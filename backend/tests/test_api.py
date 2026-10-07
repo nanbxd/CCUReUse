@@ -14,7 +14,11 @@ os.environ["BOT_TOKEN"] = ""
 os.environ["JWT_SECRET"] = "test-secret-with-at-least-thirty-two-characters"
 os.environ["ADMIN_PASSWORD"] = "local-test-admin-password"
 
-from app.main import app, bot_start, bot_support_message, bot_support_reply, engine, telegram_code, user_from_telegram_code  # noqa: E402
+from app.main import (  # noqa: E402
+    SessionLocal, Subscription, TelegramSubscription, app, bot_categories, bot_preference,
+    bot_start, bot_support_message, bot_support_reply, engine, notify_subscribers,
+    telegram_code, user_from_telegram_code,
+)
 
 
 class CuruApiTest(unittest.TestCase):
@@ -100,6 +104,42 @@ class CuruApiTest(unittest.TestCase):
         with patch("app.main.BOT_TOKEN", "test-token"), patch("app.main.BOT_USERNAME", "CuruTestBot"), patch("app.main.SUPPORT_CHAT_ID", "9999"):
             self.assertEqual(self.client.get("/api/support").json()["bot_url"], "https://t.me/CuruTestBot?start=support")
         self.assertEqual(self.client.get("/api/support").json()["bot_url"], "")
+
+    def test_bot_categories_work_without_site_account_and_survive_linking(self):
+        chat = SimpleNamespace(id=888001, type="private")
+        message = SimpleNamespace(text="/start", chat=chat, answer=AsyncMock())
+        asyncio.run(bot_start(message, SimpleNamespace()))
+        message.answer.assert_awaited_once()
+        stale_link = SimpleNamespace(text="/start invalid", chat=chat, answer=AsyncMock())
+        asyncio.run(bot_start(stale_link, SimpleNamespace()))
+        self.assertIn("reply_markup", stale_link.answer.await_args.kwargs)
+        with SessionLocal() as db:
+            sub = db.query(TelegramSubscription).filter_by(chat_id=str(chat.id)).one()
+            self.assertEqual(sub.categories, "")
+        callback = SimpleNamespace(data="cat:2", message=SimpleNamespace(chat=chat, edit_reply_markup=AsyncMock()), answer=AsyncMock())
+        asyncio.run(bot_preference(callback))
+        with SessionLocal() as db:
+            sub = db.query(TelegramSubscription).filter_by(chat_id=str(chat.id)).one()
+            self.assertEqual(sub.categories, "Книги")
+        categories_message = SimpleNamespace(chat=chat, answer=AsyncMock())
+        asyncio.run(bot_categories(categories_message))
+        self.assertIn("✅ Книги", [row[0].text for row in categories_message.answer.await_args.kwargs["reply_markup"].inline_keyboard])
+
+        owner = self.client.post("/api/auth/register", json={"name": "Автор уведомления", "email": "notify-owner@example.com", "password": "password123", "education_level": "university", "contact": "@owner"}).json()
+        headers = {"Authorization": f"Bearer {owner['token']}"}
+        listing = self.client.post("/api/listings", headers=headers, json={"title": "Книга для бота", "description": "Полезная книга для учёбы", "category": "Книги", "condition": "Хорошее состояние", "location": "Библиотека"}).json()
+        fake_bot = SimpleNamespace(send_message=AsyncMock(), session=SimpleNamespace(close=AsyncMock()))
+        with patch("app.main.BOT_TOKEN", "test-token"), patch("app.main.Bot", return_value=fake_bot):
+            asyncio.run(notify_subscribers(listing["id"]))
+        fake_bot.send_message.assert_awaited_once()
+        self.assertEqual(fake_bot.send_message.await_args.args[0], str(chat.id))
+
+        linked_message = SimpleNamespace(text=f"/start {telegram_code(owner['user']['id'])}", chat=chat, answer=AsyncMock())
+        asyncio.run(bot_start(linked_message, SimpleNamespace()))
+        with SessionLocal() as db:
+            self.assertIsNone(db.query(TelegramSubscription).filter_by(chat_id=str(chat.id)).first())
+            self.assertEqual(db.query(Subscription).filter_by(chat_id=str(chat.id)).one().categories, "Книги")
+        self.assertEqual(self.client.delete(f"/api/listings/{listing['id']}", headers=headers).status_code, 204)
 
 
 if __name__ == "__main__":

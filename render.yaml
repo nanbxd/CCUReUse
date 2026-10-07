@@ -20,6 +20,10 @@ services:
         value: "true"
       - key: ADMIN_PASSWORD
         sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: BOT_USERNAME
+        sync: false
       - key: SUPPORT_CHAT_ID
         sync: false
 

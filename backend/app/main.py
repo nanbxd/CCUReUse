@@ -83,6 +83,14 @@ class Subscription(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class TelegramSubscription(Base):
+    __tablename__ = "telegram_subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    categories: Mapped[str] = mapped_column(String(300), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class SupportMessage(Base):
     __tablename__ = "support_messages"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -265,11 +273,32 @@ async def start_support(message: Message, state: FSMContext):
     await message.answer("Напиши свой вопрос одним сообщением. Команда CURU ответит здесь. Для выхода отправь /cancel.")
 
 
-def preference_keyboard(sub: Subscription) -> InlineKeyboardMarkup:
+def preference_keyboard(sub: Subscription | TelegramSubscription) -> InlineKeyboardMarkup:
     selected = set(filter(None, sub.categories.split("|")))
     rows = [[InlineKeyboardButton(text=f"{'✅' if category in selected else '▫️'} {category}", callback_data=f"cat:{i}")] for i, category in enumerate(CATEGORIES)]
-    rows.append([InlineKeyboardButton(text="🔔 Включены" if sub.enabled else "🔕 Выключены", callback_data="toggle")])
+    rows.append([InlineKeyboardButton(text="🔔 Уведомления включены" if sub.enabled else "🔕 Уведомления выключены", callback_data="toggle")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def chat_subscription(db: Session, chat_id: str, create: bool = False) -> Subscription | TelegramSubscription | None:
+    sub = db.scalar(select(Subscription).where(Subscription.chat_id == chat_id))
+    if sub:
+        return sub
+    sub = db.scalar(select(TelegramSubscription).where(TelegramSubscription.chat_id == chat_id))
+    if not sub and create:
+        sub = TelegramSubscription(chat_id=chat_id, categories="", enabled=True)
+        db.add(sub)
+        db.commit()
+    return sub
+
+
+async def show_categories(message: Message):
+    if message.chat.type != "private":
+        await message.answer("Открой бота в личных сообщениях, чтобы настроить уведомления.")
+        return
+    with SessionLocal() as db:
+        sub = chat_subscription(db, str(message.chat.id), create=True)
+        await message.answer("Выбери интересующие категории кнопками ниже. Отмеченные категории будут приносить уведомления о новых вещах. Настройки можно открыть снова командой /categories.", reply_markup=preference_keyboard(sub))
 
 
 @bot_router.message(CommandStart())
@@ -279,30 +308,42 @@ async def bot_start(message: Message, state: FSMContext):
         await start_support(message, state)
         return
     if len(code) != 2:
-        await message.answer("Привет! Открой профиль на CURU и нажми «Подключить Telegram», чтобы получать вещи из любимых категорий.")
+        await show_categories(message)
         return
     try:
         user_id = user_from_telegram_code(code[1])
     except ValueError:
-        await message.answer("Ссылка устарела. Получи новую в профиле CURU.")
+        await message.answer("Ссылка на профиль устарела. Новую можно получить на сайте; уведомления доступны и без привязки аккаунта.")
+        await show_categories(message)
         return
     with SessionLocal() as db:
         if not db.get(User, user_id):
             await message.answer("Аккаунт не найден.")
+            await show_categories(message)
             return
         old_chat = db.scalar(select(Subscription).where(Subscription.chat_id == str(message.chat.id)))
         if old_chat and old_chat.user_id != user_id:
             db.delete(old_chat)
             db.flush()
         sub = db.scalar(select(Subscription).where(Subscription.user_id == user_id))
+        standalone = db.scalar(select(TelegramSubscription).where(TelegramSubscription.chat_id == str(message.chat.id)))
         if not sub:
-            sub = Subscription(user_id=user_id, chat_id=str(message.chat.id), categories="|".join(CATEGORIES))
+            sub = Subscription(user_id=user_id, chat_id=str(message.chat.id), categories=standalone.categories if standalone else "", enabled=standalone.enabled if standalone else True)
             db.add(sub)
         else:
             sub.chat_id = str(message.chat.id)
-            sub.enabled = True
+            if standalone:
+                sub.categories = standalone.categories
+                sub.enabled = standalone.enabled
+        if standalone:
+            db.delete(standalone)
         db.commit()
-        await message.answer("Готово! Выбери категории для уведомлений:", reply_markup=preference_keyboard(sub))
+        await message.answer("Аккаунт подключён. Выбери категории для уведомлений:", reply_markup=preference_keyboard(sub))
+
+
+@bot_router.message(Command("categories"))
+async def bot_categories(message: Message):
+    await show_categories(message)
 
 
 @bot_router.message(Command("support"))
@@ -362,16 +403,19 @@ async def bot_support_reply(message: Message):
 @bot_router.callback_query(F.data.startswith("cat:") | (F.data == "toggle"))
 async def bot_preference(callback: CallbackQuery):
     with SessionLocal() as db:
-        sub = db.scalar(select(Subscription).where(Subscription.chat_id == str(callback.message.chat.id)))
+        sub = chat_subscription(db, str(callback.message.chat.id))
         if not sub:
-            await callback.answer("Сначала подключи бот через профиль CURU", show_alert=True)
+            await callback.answer("Отправь /start, чтобы выбрать категории", show_alert=True)
             return
         if callback.data == "toggle":
             sub.enabled = not sub.enabled
         else:
             try:
-                category = CATEGORIES[int(callback.data.split(":")[1])]
+                index = int(callback.data.split(":")[1])
+                category = CATEGORIES[index] if 0 <= index < len(CATEGORIES) else None
             except (ValueError, IndexError):
+                category = None
+            if category is None:
                 await callback.answer("Категория не найдена")
                 return
             selected = set(filter(None, sub.categories.split("|")))
@@ -387,7 +431,7 @@ async def run_bot():
     dispatcher = Dispatcher()
     dispatcher.include_router(bot_router)
     try:
-        await bot.set_my_commands([BotCommand(command="start", description="Подключить CURU"), BotCommand(command="support", description="Написать в поддержку"), BotCommand(command="cancel", description="Завершить обращение")])
+        await bot.set_my_commands([BotCommand(command="start", description="Выбрать категории"), BotCommand(command="categories", description="Настроить уведомления"), BotCommand(command="support", description="Написать в поддержку"), BotCommand(command="cancel", description="Завершить обращение")])
         await dispatcher.start_polling(bot, handle_signals=False)
     finally:
         await bot.session.close()
@@ -502,7 +546,8 @@ async def notify_subscribers(listing_id: int):
         if not item:
             return
         subs = db.scalars(select(Subscription).where(Subscription.enabled == True, Subscription.user_id != item.owner_id)).all()
-        recipients = [s.chat_id for s in subs if item.category in s.categories.split("|")]
+        telegram_subs = db.scalars(select(TelegramSubscription).where(TelegramSubscription.enabled == True)).all()
+        recipients = sorted({s.chat_id for s in [*subs, *telegram_subs] if item.category in s.categories.split("|")})
         title, category, location = item.title, item.category, item.location
     bot = Bot(BOT_TOKEN)
     frontend = os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")[0].strip().rstrip("/")
