@@ -27,11 +27,12 @@ class CuruApiTest(unittest.TestCase):
         test_dir.cleanup()
 
     def test_register_publish_search_and_status(self):
-        response = self.client.post("/api/auth/register", json={"name": "Алия Тест", "email": "aliya@example.com", "password": "password123", "faculty": "Инженерия", "contact": "@aliya"})
+        response = self.client.post("/api/auth/register", json={"name": "Алия Тест", "email": "aliya@example.com", "password": "password123", "education_level": "university", "study_group": "ИС-22-1", "contact": "@aliya"})
         self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["user"]["study_group"], "ИС-22-1")
         token = response.json()["token"]
         headers = {"Authorization": f"Bearer {token}"}
-        self.assertEqual(self.client.post("/api/auth/register", json={"name": "Алия Тест", "email": "aliya@example.com", "password": "password123"}).status_code, 409)
+        self.assertEqual(self.client.post("/api/auth/register", json={"name": "Алия Тест", "email": "aliya@example.com", "password": "password123", "education_level": "university"}).status_code, 409)
         self.assertEqual(self.client.post("/api/auth/login", json={"email": "aliya@example.com", "password": "password123"}).status_code, 200)
         response = self.client.post("/api/listings", headers=headers, json={"title": "Учебник физики", "description": "Хороший учебник для первого курса", "category": "Книги", "condition": "Хорошее состояние", "location": "Библиотека", "image": ""})
         self.assertEqual(response.status_code, 201, response.text)
@@ -51,7 +52,7 @@ class CuruApiTest(unittest.TestCase):
             user_from_telegram_code(code + "broken")
 
     def test_admin_can_delete_another_users_listing(self):
-        owner = self.client.post("/api/auth/register", json={"name": "Другой студент", "email": "owner@example.com", "password": "password123", "contact": "@owner"}).json()
+        owner = self.client.post("/api/auth/register", json={"name": "Другой студент", "email": "owner@example.com", "password": "password123", "education_level": "college", "contact": "@owner"}).json()
         owner_headers = {"Authorization": f"Bearer {owner['token']}"}
         item = self.client.post("/api/listings", headers=owner_headers, json={"title": "Чужая вещь", "description": "Вещь в хорошем состоянии", "category": "Книги", "condition": "Хорошее состояние", "location": "Библиотека"}).json()
         admin_response = self.client.post("/api/auth/login", json={"email": "demo@curu.local", "password": "local-test-admin-password"})
@@ -59,11 +60,23 @@ class CuruApiTest(unittest.TestCase):
         self.assertTrue(admin_response.json()["user"]["is_admin"])
         admin_headers = {"Authorization": f"Bearer {admin_response.json()['token']}"}
         self.assertEqual(self.client.delete(f"/api/listings/{item['id']}").status_code, 401)
-        outsider = self.client.post("/api/auth/register", json={"name": "Обычный пользователь", "email": "outsider@example.com", "password": "password123", "is_admin": True}).json()
+        outsider = self.client.post("/api/auth/register", json={"name": "Обычный пользователь", "email": "outsider@example.com", "password": "password123", "education_level": "university", "is_admin": True}).json()
         self.assertFalse(outsider["user"]["is_admin"])
         self.assertEqual(self.client.delete(f"/api/listings/{item['id']}", headers={"Authorization": f"Bearer {outsider['token']}"}).status_code, 403)
         self.assertEqual(self.client.delete(f"/api/listings/{item['id']}", headers=admin_headers).status_code, 204)
         self.assertEqual(self.client.get(f"/api/listings/{item['id']}").status_code, 404)
+
+    def test_registration_rejects_unlisted_school_type_and_allows_group_edit(self):
+        base = {"name": "Новый студент", "email": "group@example.com", "password": "password123"}
+        self.assertEqual(self.client.post("/api/auth/register", json={**base, "education_level": "school"}).status_code, 422)
+        self.assertEqual(self.client.post("/api/auth/register", json=base).status_code, 422)
+        response = self.client.post("/api/auth/register", json={**base, "education_level": "college", "study_group": "К-21"})
+        self.assertEqual(response.status_code, 201, response.text)
+        headers = {"Authorization": f"Bearer {response.json()['token']}"}
+        updated = self.client.patch("/api/me", headers=headers, json={"name": "Новый студент", "education_level": "university", "study_group": "ИС-23", "contact": "", "bio": ""})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["education_level"], "university")
+        self.assertEqual(updated.json()["study_group"], "ИС-23")
 
 
 if __name__ == "__main__":

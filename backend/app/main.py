@@ -47,6 +47,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(200))
     faculty: Mapped[str] = mapped_column(String(120), default="")
+    education_level: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    study_group: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     contact: Mapped[str] = mapped_column(String(200), default="")
     bio: Mapped[str] = mapped_column(String(400), default="")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -82,7 +84,8 @@ class UserIn(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
-    faculty: str = Field(default="", max_length=120)
+    education_level: Literal["university", "college"]
+    study_group: str = Field(default="", max_length=40)
     contact: str = Field(default="", max_length=200)
 
 
@@ -93,7 +96,8 @@ class LoginIn(BaseModel):
 
 class ProfileIn(BaseModel):
     name: str = Field(min_length=2, max_length=100)
-    faculty: str = Field(default="", max_length=120)
+    education_level: Literal["university", "college"] | None = None
+    study_group: str = Field(default="", max_length=40)
     contact: str = Field(default="", max_length=200)
     bio: str = Field(default="", max_length=400)
 
@@ -198,14 +202,20 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
 
 
 def user_data(user: User) -> dict:
-    return {"id": user.id, "name": user.name, "email": user.email, "faculty": user.faculty, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "created_at": user.created_at.isoformat()}
+    return {"id": user.id, "name": user.name, "email": user.email, "education_level": user.education_level, "study_group": user.study_group, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "created_at": user.created_at.isoformat()}
 
 
-def migrate_admin_column():
+def migrate_user_columns():
     # create_all does not add columns to existing installations.
-    if inspect(engine).has_table("users") and "is_admin" not in {column["name"] for column in inspect(engine).get_columns("users")}:
+    if inspect(engine).has_table("users"):
+        columns = {column["name"] for column in inspect(engine).get_columns("users")}
         with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+            if "is_admin" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+            if "education_level" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN education_level VARCHAR(20) NOT NULL DEFAULT ''"))
+            if "study_group" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN study_group VARCHAR(40) NOT NULL DEFAULT ''"))
 
 
 def prepare_admin():
@@ -303,7 +313,7 @@ async def run_bot():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
-    migrate_admin_column()
+    migrate_user_columns()
     if os.getenv("SEED_DEMO", "true").lower() == "true":
         seed_demo()
     prepare_admin()
@@ -336,7 +346,7 @@ def register(data: UserIn, db: Annotated[Session, Depends(get_db)]):
     email = data.email.lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, "Этот email уже зарегистрирован")
-    user = User(name=data.name.strip(), email=email, password_hash=hash_password(data.password), faculty=data.faculty.strip(), contact=data.contact.strip())
+    user = User(name=data.name.strip(), email=email, password_hash=hash_password(data.password), education_level=data.education_level, study_group=data.study_group.strip(), contact=data.contact.strip())
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -360,7 +370,8 @@ def me(user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depe
 @app.patch("/api/me")
 def update_me(data: ProfileIn, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
     for key, value in data.model_dump().items():
-        setattr(user, key, value.strip())
+        if value is not None:
+            setattr(user, key, value.strip())
     db.commit()
     return user_data(user)
 
