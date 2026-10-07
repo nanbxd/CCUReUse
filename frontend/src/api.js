@@ -1,4 +1,4 @@
-export const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+export const API_URL = (import.meta.env.VITE_API_URL || 'https://curu-api.onrender.com').replace(/\/$/, '')
 
 export async function api(path, options = {}) {
   const token = localStorage.getItem('curu_token')
