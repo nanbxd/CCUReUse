@@ -1,6 +1,9 @@
+import asyncio
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -11,7 +14,7 @@ os.environ["BOT_TOKEN"] = ""
 os.environ["JWT_SECRET"] = "test-secret-with-at-least-thirty-two-characters"
 os.environ["ADMIN_PASSWORD"] = "local-test-admin-password"
 
-from app.main import app, engine, telegram_code, user_from_telegram_code  # noqa: E402
+from app.main import app, bot_start, bot_support_message, bot_support_reply, engine, telegram_code, user_from_telegram_code  # noqa: E402
 
 
 class CuruApiTest(unittest.TestCase):
@@ -77,6 +80,26 @@ class CuruApiTest(unittest.TestCase):
         self.assertEqual(updated.status_code, 200, updated.text)
         self.assertEqual(updated.json()["education_level"], "university")
         self.assertEqual(updated.json()["study_group"], "ИС-23")
+
+    def test_telegram_support_routes_question_and_reply(self):
+        bot = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(message_id=98765)))
+        state = SimpleNamespace(set_state=AsyncMock())
+        start_message = SimpleNamespace(text="/start support", chat=SimpleNamespace(id=1234, type="private"), answer=AsyncMock())
+        user_message = SimpleNamespace(text="Как удалить объявление?", from_user=SimpleNamespace(full_name="Алия", username="aliya"), chat=SimpleNamespace(id=1234), bot=bot, answer=AsyncMock())
+        admin_reply = SimpleNamespace(text="Откройте карточку и нажмите удалить.", chat=SimpleNamespace(id=9999), reply_to_message=SimpleNamespace(message_id=98765), bot=bot, answer=AsyncMock(), reply=AsyncMock())
+        with patch("app.main.SUPPORT_CHAT_ID", "9999"):
+            asyncio.run(bot_start(start_message, state))
+            state.set_state.assert_awaited_once()
+            asyncio.run(bot_support_message(user_message))
+            bot.send_message.assert_any_await(9999, unittest.mock.ANY)
+            asyncio.run(bot_support_reply(admin_reply))
+            bot.send_message.assert_any_await(1234, unittest.mock.ANY)
+            admin_reply.reply.assert_awaited_once()
+
+    def test_support_link_requires_bot_and_support_chat(self):
+        with patch("app.main.BOT_TOKEN", "test-token"), patch("app.main.BOT_USERNAME", "CuruTestBot"), patch("app.main.SUPPORT_CHAT_ID", "9999"):
+            self.assertEqual(self.client.get("/api/support").json()["bot_url"], "https://t.me/CuruTestBot?start=support")
+        self.assertEqual(self.client.get("/api/support").json()["bot_url"], "")
 
 
 if __name__ == "__main__":

@@ -10,8 +10,10 @@ from typing import Annotated, Literal
 
 import jwt
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +31,7 @@ elif DATABASE_URL.startswith("postgresql://"):
 SECRET = os.getenv("JWT_SECRET", "dev-only-change-me")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "")
+SUPPORT_CHAT_ID = os.getenv("SUPPORT_CHAT_ID", "").strip()
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "demo@curu.local").strip().lower()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 CATEGORIES = ["Одежда", "Гаджеты", "Книги", "Для учёбы", "Для дома", "Другое"]
@@ -78,6 +81,13 @@ class Subscription(Base):
     chat_id: Mapped[str] = mapped_column(String(40), unique=True)
     categories: Mapped[str] = mapped_column(String(300), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    admin_message_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    user_chat_id: Mapped[str] = mapped_column(String(40))
 
 
 class UserIn(BaseModel):
@@ -240,6 +250,21 @@ def listing_data(item: Listing) -> dict:
 bot_router = Router()
 
 
+class SupportState(StatesGroup):
+    waiting_for_message = State()
+
+
+async def start_support(message: Message, state: FSMContext):
+    if message.chat.type != "private":
+        await message.answer("Открой бота в личных сообщениях, чтобы написать в поддержку.")
+        return
+    if not SUPPORT_CHAT_ID:
+        await message.answer("Поддержка пока недоступна. Попробуй позже.")
+        return
+    await state.set_state(SupportState.waiting_for_message)
+    await message.answer("Напиши свой вопрос одним сообщением. Команда CURU ответит здесь. Для выхода отправь /cancel.")
+
+
 def preference_keyboard(sub: Subscription) -> InlineKeyboardMarkup:
     selected = set(filter(None, sub.categories.split("|")))
     rows = [[InlineKeyboardButton(text=f"{'✅' if category in selected else '▫️'} {category}", callback_data=f"cat:{i}")] for i, category in enumerate(CATEGORIES)]
@@ -248,8 +273,11 @@ def preference_keyboard(sub: Subscription) -> InlineKeyboardMarkup:
 
 
 @bot_router.message(CommandStart())
-async def bot_start(message: Message):
+async def bot_start(message: Message, state: FSMContext):
     code = (message.text or "").split(maxsplit=1)
+    if len(code) == 2 and code[1] == "support":
+        await start_support(message, state)
+        return
     if len(code) != 2:
         await message.answer("Привет! Открой профиль на CURU и нажми «Подключить Telegram», чтобы получать вещи из любимых категорий.")
         return
@@ -275,6 +303,60 @@ async def bot_start(message: Message):
             sub.enabled = True
         db.commit()
         await message.answer("Готово! Выбери категории для уведомлений:", reply_markup=preference_keyboard(sub))
+
+
+@bot_router.message(Command("support"))
+async def bot_support(message: Message, state: FSMContext):
+    await start_support(message, state)
+
+
+@bot_router.message(Command("cancel"))
+async def bot_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Обращение закрыто. Чтобы написать снова, отправь /support.")
+
+
+@bot_router.message(Command("chatid"))
+async def bot_chat_id(message: Message):
+    await message.answer(f"ID этого чата: {message.chat.id}")
+
+
+@bot_router.message(SupportState.waiting_for_message)
+async def bot_support_message(message: Message):
+    if not message.text:
+        await message.answer("Пожалуйста, отправь вопрос текстом.")
+        return
+    if len(message.text) > 3500:
+        await message.answer("Сообщение слишком длинное. Сократи его до 3500 символов.")
+        return
+    sender = message.from_user.full_name if message.from_user else "Пользователь"
+    username = f" (@{message.from_user.username})" if message.from_user and message.from_user.username else ""
+    try:
+        sent = await message.bot.send_message(int(SUPPORT_CHAT_ID), f"📩 Поддержка CURU\nОт: {sender}{username}\n\n{message.text}\n\nОтветь на это сообщение реплаем.")
+    except Exception:
+        await message.answer("Не удалось отправить вопрос. Попробуй позже.")
+        return
+    with SessionLocal() as db:
+        db.add(SupportMessage(admin_message_id=sent.message_id, user_chat_id=str(message.chat.id)))
+        db.commit()
+    await message.answer("Вопрос отправлен команде CURU. Ответ придёт сюда. Можешь написать ещё сообщение или отправить /cancel.")
+
+
+@bot_router.message(F.reply_to_message)
+async def bot_support_reply(message: Message):
+    if not SUPPORT_CHAT_ID or str(message.chat.id) != SUPPORT_CHAT_ID or not message.text:
+        return
+    with SessionLocal() as db:
+        original = db.scalar(select(SupportMessage).where(SupportMessage.admin_message_id == message.reply_to_message.message_id))
+        user_chat_id = original.user_chat_id if original else None
+    if not user_chat_id:
+        return
+    try:
+        await message.bot.send_message(int(user_chat_id), f"💬 Ответ команды CURU:\n\n{message.text}")
+    except Exception:
+        await message.answer("Не удалось доставить ответ пользователю.")
+        return
+    await message.reply("Ответ отправлен пользователю.")
 
 
 @bot_router.callback_query(F.data.startswith("cat:") | (F.data == "toggle"))
@@ -305,6 +387,7 @@ async def run_bot():
     dispatcher = Dispatcher()
     dispatcher.include_router(bot_router)
     try:
+        await bot.set_my_commands([BotCommand(command="start", description="Подключить CURU"), BotCommand(command="support", description="Написать в поддержку"), BotCommand(command="cancel", description="Завершить обращение")])
         await dispatcher.start_polling(bot, handle_signals=False)
     finally:
         await bot.session.close()
@@ -339,6 +422,11 @@ def health():
 @app.get("/api/categories")
 def categories():
     return CATEGORIES
+
+
+@app.get("/api/support")
+def support_info():
+    return {"bot_url": f"https://t.me/{BOT_USERNAME}?start=support" if BOT_USERNAME and BOT_TOKEN and SUPPORT_CHAT_ID else ""}
 
 
 @app.post("/api/auth/register", status_code=201)

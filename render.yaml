@@ -20,6 +20,8 @@ services:
         value: "true"
       - key: ADMIN_PASSWORD
         sync: false
+      - key: SUPPORT_CHAT_ID
+        sync: false
 
 databases:
   - name: curu-db
