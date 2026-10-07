@@ -17,7 +17,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, func, or_, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, func, inspect, or_, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 load_dotenv()
@@ -29,6 +29,8 @@ elif DATABASE_URL.startswith("postgresql://"):
 SECRET = os.getenv("JWT_SECRET", "dev-only-change-me")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "demo@curu.local").strip().lower()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 CATEGORIES = ["Одежда", "Гаджеты", "Книги", "Для учёбы", "Для дома", "Другое"]
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine)
@@ -47,6 +49,7 @@ class User(Base):
     faculty: Mapped[str] = mapped_column(String(120), default="")
     contact: Mapped[str] = mapped_column(String(200), default="")
     bio: Mapped[str] = mapped_column(String(400), default="")
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     listings: Mapped[list["Listing"]] = relationship(back_populates="owner")
 
@@ -84,7 +87,7 @@ class UserIn(BaseModel):
 
 
 class LoginIn(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=255)
     password: str
 
 
@@ -195,7 +198,29 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
 
 
 def user_data(user: User) -> dict:
-    return {"id": user.id, "name": user.name, "email": user.email, "faculty": user.faculty, "contact": user.contact, "bio": user.bio, "created_at": user.created_at.isoformat()}
+    return {"id": user.id, "name": user.name, "email": user.email, "faculty": user.faculty, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "created_at": user.created_at.isoformat()}
+
+
+def migrate_admin_column():
+    # create_all does not add columns to existing installations.
+    if inspect(engine).has_table("users") and "is_admin" not in {column["name"] for column in inspect(engine).get_columns("users")}:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+
+
+def prepare_admin():
+    if not ADMIN_PASSWORD:
+        return
+    if len(ADMIN_PASSWORD) < 12:
+        raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters")
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        if not user:
+            user = User(name="Команда CURU", email=ADMIN_EMAIL, faculty="Caspian University", contact="", bio="Команда CURU")
+            db.add(user)
+        user.password_hash = hash_password(ADMIN_PASSWORD)
+        user.is_admin = True
+        db.commit()
 
 
 def listing_data(item: Listing) -> dict:
@@ -278,8 +303,10 @@ async def run_bot():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    migrate_admin_column()
     if os.getenv("SEED_DEMO", "true").lower() == "true":
         seed_demo()
+    prepare_admin()
     task = asyncio.create_task(run_bot()) if BOT_TOKEN else None
     yield
     if task:
@@ -419,7 +446,7 @@ def delete_listing(listing_id: int, user: Annotated[User, Depends(current_user)]
     item = db.get(Listing, listing_id)
     if not item:
         raise HTTPException(404, "Вещь не найдена")
-    if item.owner_id != user.id:
+    if item.owner_id != user.id and not user.is_admin:
         raise HTTPException(403, "Это не ваша вещь")
     db.delete(item)
     db.commit()

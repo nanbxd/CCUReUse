@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, Bell, BookOpen, Check, ChevronRight, Clock3, Heart, Laptop, Leaf, MapPin, Menu, Plus, Search, Shirt, SlidersHorizontal, Sparkles, Send, UserRound, X, Home as HomeIcon, Package, LogOut, Edit3, ExternalLink, Camera, Gift, Recycle } from 'lucide-react'
 import { api, categories } from './api'
+import { Lottie } from 'lottie-react'
+import curuAnimation from './animations/curu.json'
+import curuLogo from './logos/logo.png'
 
 const categoryIcons = { 'Все': Sparkles, 'Одежда': Shirt, 'Гаджеты': Laptop, 'Книги': BookOpen, 'Для учёбы': Edit3, 'Для дома': HomeIcon, 'Другое': Package }
 const statusLabels = { available: 'Доступно', reserved: 'Забронировано', given: 'Передано' }
@@ -30,8 +33,7 @@ function useItems(params = '') {
 
 function Brand({ light = false }) {
   return <Link to="/" className={`brand ${light ? 'brand-light' : ''}`} aria-label="CURU — главная">
-    <span className="brand-mark"><Recycle size={23} strokeWidth={2.5} /></span>
-    <span className="brand-copy"><strong>CURU<span className="brand-dot">.</span></strong><small>CASPIAN UNIVERSITY RE-USE</small></span>
+    <img className="brand-logo" src={curuLogo} alt="CURU" />
   </Link>
 }
 
@@ -47,6 +49,7 @@ function Header({ user, onLogout }) {
         <NavLink onClick={close} to="/catalog">Каталог</NavLink>
         <NavLink onClick={close} to="/feed">Лента</NavLink>
         <NavLink onClick={close} to="/about">О проекте</NavLink>
+        {user?.is_admin && <NavLink onClick={close} to="/admin">Админ</NavLink>}
       </nav>
       <div className="header-actions">
         <button className="btn btn-primary btn-sm header-add" onClick={() => navigate(user ? '/create' : '/auth?next=/create')}><Plus size={18} /> Разместить вещь</button>
@@ -82,7 +85,7 @@ function Home() {
   return <>
     <section className="hero"><div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" /><div className="container hero-grid">
       <div className="hero-copy"><div className="eyebrow hero-eyebrow"><span className="eyebrow-dot" /> ЭКОШЕРИНГ СООБЩЕСТВО CASPIAN UNIVERSITY</div><h1>Вещам —<br /><em>новую жизнь.</em><br />Студентам —<br />новые возможности.</h1><p>Отдавай то, что больше не нужно, и находи полезное у своих. Бесплатно, просто и с заботой о планете.</p><div className="hero-buttons"><Link to="/catalog" className="btn btn-lime">Найти вещь <ArrowRight size={19} /></Link><Link to="/create" className="btn btn-outline-light">Отдать вещь <Plus size={18} /></Link></div><div className="hero-proof"><span className="avatar-stack"><i>А</i><i>М</i><i>Д</i></span><span>Сообщество, где вещи находят<br />своих новых людей</span></div></div>
-      <div className="hero-visual"><div className="hero-blob" /><div className="hero-main-card"><img src="https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=1100&q=85" alt="Рюкзак для учёбы" /><div className="hero-card-info"><span>НАШЛО НОВЫЙ ДОМ</span><strong>Рюкзак для учёбы</strong><small><MapPin size={13} /> Главный корпус</small></div></div><div className="hero-sticker sticker-top"><Recycle size={19} /><span>Вторая жизнь<br /><b>каждой вещи</b></span></div><div className="hero-sticker sticker-bottom"><span>✦</span><b>100% бесплатно</b></div><div className="hero-spark spark-one">✳</div><div className="hero-spark spark-two">✦</div></div>
+      <div className="hero-visual" role="img" aria-label="Анимация CURU о передаче вещей"><Lottie src={curuAnimation} loop autoplay className="hero-animation" /></div>
     </div><div className="hero-bottom-line" /></section>
     <section className="steps-strip"><div className="container steps-inner"><div><span className="step-icon"><Search size={22} /></span><p><strong>Найди</strong><br />то, что нужно</p></div><ChevronRight className="step-chevron" /><div><span className="step-icon"><UserRound size={22} /></span><p><strong>Свяжись</strong><br />со студентом</p></div><ChevronRight className="step-chevron" /><div><span className="step-icon"><Heart size={22} /></span><p><strong>Забери</strong><br />и дай вещи новую жизнь</p></div></div></section>
     <section className="section categories-section"><div className="container"><div className="section-heading"><div><span className="section-label">НАЙДИ СВОЁ</span><h2>Что ищем сегодня?</h2><p>Выбирай категорию и находи нужные вещи рядом с тобой.</p></div><Link className="text-link" to="/catalog">Весь каталог <ArrowRight size={18} /></Link></div><div className="category-grid">{categories.slice(1).map((name, i) => { const Icon = categoryIcons[name]; return <Link to={`/catalog?category=${encodeURIComponent(name)}`} className={`category-tile category-${i}`} key={name}><span className="category-icon"><Icon size={26} strokeWidth={1.8} /></span><strong>{name}</strong><ArrowRight size={18} /></Link> })}</div></div></section>
@@ -118,13 +121,14 @@ function ListingDetail({ user }) {
   const navigate = useNavigate()
   useEffect(() => { api(`/listings/${id}`).then(setItem).catch(e => setError(e.message)) }, [id])
   async function changeStatus(status) { setBusy(true); try { setItem(await api(`/listings/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) })) } catch (e) { setError(e.message) } finally { setBusy(false) } }
-  async function remove() { if (!window.confirm('Удалить объявление?')) return; setBusy(true); try { await api(`/listings/${id}`, { method: 'DELETE' }); navigate('/profile') } catch (e) { setError(e.message); setBusy(false) } }
+  async function remove() { if (!window.confirm('Удалить объявление?')) return; setBusy(true); try { await api(`/listings/${id}`, { method: 'DELETE' }); navigate(own ? '/profile' : '/catalog') } catch (e) { setError(e.message); setBusy(false) } }
   if (error && !item) return <main className="container simple-page"><Empty title="Вещь не найдена" text={error} /><Link className="btn btn-primary" to="/catalog">К каталогу</Link></main>
   if (!item) return <main className="container simple-page loading">Загружаем карточку...</main>
   const contact = item.owner.contact.trim()
   const contactHref = contact.startsWith('@') ? `https://t.me/${contact.slice(1)}` : contact.startsWith('https://') ? contact : contact.includes('@') ? `mailto:${contact}` : `tel:${contact.replace(/[^+\d]/g, '')}`
   const own = user?.id === item.owner.id
-  return <main className="page detail-page"><div className="container"><Link to="/catalog" className="back-link"><ArrowLeft size={17} /> Вернуться в каталог</Link><div className="detail-grid"><div className="detail-photo">{item.image ? <img src={item.image} alt={item.title} /> : <div className="image-fallback"><Gift size={72} /></div>}<span className="free-badge">БЕСПЛАТНО</span></div><div className="detail-info"><div className="detail-kicker"><span>{item.category}</span><span><Clock3 size={15} /> {dateText(item.created_at)}</span></div><h1>{item.title}</h1><div className={`status-pill status-${item.status}`}><span /> {statusLabels[item.status]}</div><div className="detail-rule" /><h3>О вещи</h3><p className="detail-description">{item.description}</p><div className="detail-facts"><div><span>Состояние</span><strong>{item.condition}</strong></div><div><span>Где забрать</span><strong><MapPin size={16} /> {item.location}</strong></div></div><div className="owner-box"><span className="avatar avatar-large">{initials(item.owner.name)}</span><div><small>ВЛАДЕЛЕЦ ВЕЩИ</small><Link to={`/student/${item.owner.id}`}>{item.owner.name}</Link><span>{item.owner.faculty || 'Студент Caspian University'}</span></div><ChevronRight size={19} /></div>{own ? <div className="owner-actions"><label>Статус объявления</label><select value={item.status} disabled={busy} onChange={e => changeStatus(e.target.value)}><option value="available">Доступно</option><option value="reserved">Забронировано</option><option value="given">Передано</option></select><button className="link-danger" disabled={busy} onClick={remove}>Удалить объявление</button></div> : item.status === 'available' && contact ? <a className="btn btn-primary contact-btn" href={contactHref} target={contactHref.startsWith('https://') ? '_blank' : undefined} rel="noreferrer">Связаться с владельцем <ArrowRight size={19} /></a> : <div className="notice">{item.status !== 'available' ? 'Вещь уже недоступна.' : 'Владелец ещё не указал контакт. Загляни позже.'}</div>}{contact && <p className="contact-detail">Контакт: {contact}</p>}{error && <div className="notice error">{error}</div>}</div></div></div></main>
+  const canDelete = own || user?.is_admin
+  return <main className="page detail-page"><div className="container"><Link to="/catalog" className="back-link"><ArrowLeft size={17} /> Вернуться в каталог</Link><div className="detail-grid"><div className="detail-photo">{item.image ? <img src={item.image} alt={item.title} /> : <div className="image-fallback"><Gift size={72} /></div>}<span className="free-badge">БЕСПЛАТНО</span></div><div className="detail-info"><div className="detail-kicker"><span>{item.category}</span><span><Clock3 size={15} /> {dateText(item.created_at)}</span></div><h1>{item.title}</h1><div className={`status-pill status-${item.status}`}><span /> {statusLabels[item.status]}</div><div className="detail-rule" /><h3>О вещи</h3><p className="detail-description">{item.description}</p><div className="detail-facts"><div><span>Состояние</span><strong>{item.condition}</strong></div><div><span>Где забрать</span><strong><MapPin size={16} /> {item.location}</strong></div></div><div className="owner-box"><span className="avatar avatar-large">{initials(item.owner.name)}</span><div><small>ВЛАДЕЛЕЦ ВЕЩИ</small><Link to={`/student/${item.owner.id}`}>{item.owner.name}</Link><span>{item.owner.faculty || 'Студент Caspian University'}</span></div><ChevronRight size={19} /></div>{own ? <div className="owner-actions"><label>Статус объявления</label><select value={item.status} disabled={busy} onChange={e => changeStatus(e.target.value)}><option value="available">Доступно</option><option value="reserved">Забронировано</option><option value="given">Передано</option></select><button className="link-danger" disabled={busy} onClick={remove}>Удалить объявление</button></div> : item.status === 'available' && contact ? <a className="btn btn-primary contact-btn" href={contactHref} target={contactHref.startsWith('https://') ? '_blank' : undefined} rel="noreferrer">Связаться с владельцем <ArrowRight size={19} /></a> : <div className="notice">{item.status !== 'available' ? 'Вещь уже недоступна.' : 'Владелец ещё не указал контакт. Загляни позже.'}</div>}{canDelete && !own && <div className="owner-actions"><button className="link-danger" disabled={busy} onClick={remove}>Удалить объявление (администратор)</button></div>}{contact && <p className="contact-detail">Контакт: {contact}</p>}{error && <div className="notice error">{error}</div>}</div></div></div></main>
 }
 
 function Auth({ onAuth }) {
@@ -182,10 +186,36 @@ function About() {
   return <main className="page about-page"><section className="about-hero"><div className="container"><span className="section-label">CASPIAN UNIVERSITY RE-USE</span><h1>Меняем вещи.<br /><em>Меняем привычки.</em></h1><p>CURU — пространство, где студенты Caspian University делятся тем, что им больше не нужно, и находят полезное друг у друга.</p><Link to="/catalog" className="btn btn-lime">Смотреть вещи <ArrowRight size={18} /></Link></div></section><section className="container about-content"><div className="section-heading"><div><span className="section-label">КАК ЭТО РАБОТАЕТ</span><h2>Просто, как поделиться с другом</h2></div></div><div className="about-steps"><div><span>01</span><Search size={30} /><h3>Найди вещь</h3><p>Листай каталог или ленту, используй категории и поиск.</p></div><div><span>02</span><UserRound size={30} /><h3>Напиши владельцу</h3><p>Открой карточку и свяжись со студентом напрямую.</p></div><div><span>03</span><Heart size={30} /><h3>Забери бесплатно</h3><p>Договоритесь о встрече и подари вещи новую историю.</p></div></div><div className="about-values"><div className="mission-circle"><Recycle size={70} /></div><div><span className="section-label">НАША ИДЕЯ</span><h2>Хорошие вещи заслуживают продолжения.</h2><p>Нам нравится идея кампуса, где меньше вещей отправляется в мусор, а больше студентов помогают друг другу. Здесь нет ценников: только полезные находки, обмен и забота о ресурсах.</p></div></div></section></main>
 }
 
+function AdminListings({ user }) {
+  const [items, setItems] = useState([])
+  const [offset, setOffset] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [busyId, setBusyId] = useState(null)
+  useEffect(() => {
+    if (!user?.is_admin) return
+    let active = true
+    setLoading(true)
+    api(`/listings?status=all&limit=100&offset=${offset}`).then(data => { if (active) { setItems(data); setError('') } }).catch(e => { if (active) setError(e.message) }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [user?.is_admin, offset])
+  if (!user?.is_admin) return <main className="container simple-page"><Empty title="Доступ только для администратора" /><Link className="btn btn-primary" to="/auth">Войти</Link></main>
+  async function remove(item) {
+    if (!window.confirm(`Удалить объявление «${item.title}»?`)) return
+    setBusyId(item.id)
+    setError('')
+    try {
+      await api(`/listings/${item.id}`, { method: 'DELETE' })
+      setItems(current => current.filter(entry => entry.id !== item.id))
+    } catch (e) { setError(e.message) } finally { setBusyId(null) }
+  }
+  return <main className="page"><div className="page-hero"><div className="container"><span className="section-label">КОМАНДА CURU</span><h1>Управление объявлениями<span className="accent-dot">.</span></h1><p>Все объявления сообщества, включая забронированные и переданные.</p></div></div><div className="container admin-listings">{error && <div className="notice error">{error}</div>}{loading ? <div className="loading">Загружаем объявления...</div> : items.length ? <div className="my-items">{items.map(item => <div className="my-item admin-item" key={item.id}><div className="my-item-image">{item.image ? <img src={item.image} alt="" /> : <Gift size={24} />}</div><div><Link to={`/listing/${item.id}`}><strong>{item.title}</strong></Link><small>{item.owner.name} · {item.category} · {dateText(item.created_at)}</small></div><span className={`status-pill status-${item.status}`}>{statusLabels[item.status]}</span><button className="link-danger" disabled={busyId === item.id} onClick={() => remove(item)}>Удалить</button></div>)}</div> : <Empty title="Объявлений пока нет" />}{!loading && <div className="admin-pagination"><button className="btn btn-primary btn-sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Назад</button><span>Страница {Math.floor(offset / 100) + 1}</span><button className="btn btn-primary btn-sm" disabled={items.length < 100} onClick={() => setOffset(offset + 100)}>Далее</button></div>}</div></main>
+}
+
 export default function App() {
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('curu_user') || 'null') } catch { return null } })
   function onAuth(data) { localStorage.setItem('curu_token', data.token); localStorage.setItem('curu_user', JSON.stringify(data.user)); setUser(data.user) }
   function updateUser(data) { localStorage.setItem('curu_user', JSON.stringify(data)); setUser(data) }
   function onLogout() { localStorage.removeItem('curu_token'); localStorage.removeItem('curu_user'); setUser(null) }
-  return <><Header user={user} onLogout={onLogout} /><Routes><Route path="/" element={<Home />} /><Route path="/catalog" element={<Catalog />} /><Route path="/feed" element={<Feed />} /><Route path="/listing/:id" element={<ListingDetail user={user} />} /><Route path="/auth" element={<Auth onAuth={onAuth} />} /><Route path="/create" element={<Create user={user} />} /><Route path="/profile" element={<Profile user={user} setUser={updateUser} onLogout={onLogout} />} /><Route path="/student/:id" element={<Student />} /><Route path="/about" element={<About />} /><Route path="*" element={<main className="container simple-page"><Empty title="Страница не найдена" text="Возможно, ссылка устарела." /><Link className="btn btn-primary" to="/">На главную</Link></main>} /></Routes><Footer /></>
+  return <><Header user={user} onLogout={onLogout} /><Routes><Route path="/" element={<Home />} /><Route path="/catalog" element={<Catalog />} /><Route path="/feed" element={<Feed />} /><Route path="/listing/:id" element={<ListingDetail user={user} />} /><Route path="/auth" element={<Auth onAuth={onAuth} />} /><Route path="/create" element={<Create user={user} />} /><Route path="/profile" element={<Profile user={user} setUser={updateUser} onLogout={onLogout} />} /><Route path="/admin" element={<AdminListings user={user} />} /><Route path="/student/:id" element={<Student />} /><Route path="/about" element={<About />} /><Route path="*" element={<main className="container simple-page"><Empty title="Страница не найдена" text="Возможно, ссылка устарела." /><Link className="btn btn-primary" to="/">На главную</Link></main>} /></Routes><Footer /></>
 }

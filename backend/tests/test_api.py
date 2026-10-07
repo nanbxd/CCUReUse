@@ -9,6 +9,7 @@ os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(test_dir.name, "curu-te
 os.environ["SEED_DEMO"] = "false"
 os.environ["BOT_TOKEN"] = ""
 os.environ["JWT_SECRET"] = "test-secret-with-at-least-thirty-two-characters"
+os.environ["ADMIN_PASSWORD"] = "local-test-admin-password"
 
 from app.main import app, engine, telegram_code, user_from_telegram_code  # noqa: E402
 
@@ -48,6 +49,21 @@ class CuruApiTest(unittest.TestCase):
         self.assertEqual(user_from_telegram_code(code), 123)
         with self.assertRaises(ValueError):
             user_from_telegram_code(code + "broken")
+
+    def test_admin_can_delete_another_users_listing(self):
+        owner = self.client.post("/api/auth/register", json={"name": "Другой студент", "email": "owner@example.com", "password": "password123", "contact": "@owner"}).json()
+        owner_headers = {"Authorization": f"Bearer {owner['token']}"}
+        item = self.client.post("/api/listings", headers=owner_headers, json={"title": "Чужая вещь", "description": "Вещь в хорошем состоянии", "category": "Книги", "condition": "Хорошее состояние", "location": "Библиотека"}).json()
+        admin_response = self.client.post("/api/auth/login", json={"email": "demo@curu.local", "password": "local-test-admin-password"})
+        self.assertEqual(admin_response.status_code, 200, admin_response.text)
+        self.assertTrue(admin_response.json()["user"]["is_admin"])
+        admin_headers = {"Authorization": f"Bearer {admin_response.json()['token']}"}
+        self.assertEqual(self.client.delete(f"/api/listings/{item['id']}").status_code, 401)
+        outsider = self.client.post("/api/auth/register", json={"name": "Обычный пользователь", "email": "outsider@example.com", "password": "password123", "is_admin": True}).json()
+        self.assertFalse(outsider["user"]["is_admin"])
+        self.assertEqual(self.client.delete(f"/api/listings/{item['id']}", headers={"Authorization": f"Bearer {outsider['token']}"}).status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/listings/{item['id']}", headers=admin_headers).status_code, 204)
+        self.assertEqual(self.client.get(f"/api/listings/{item['id']}").status_code, 404)
 
 
 if __name__ == "__main__":
