@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 from pydantic import BaseModel
 import os
+from sqlalchemy.engine import URL
 
 base_dir = Path.cwd()
 
@@ -10,16 +11,32 @@ class Settings(BaseSettings):
         env_file=os.path.join(base_dir, ".env")
     )
 
-    database_url: str = "sqlite:///./curu.db"
+    db_user: str
+    db_password: str
+    db_port: int
+    db_host: str
+    db_name: str
+
     jwt_secret: str
     frontend_url: str = "http://localhost:5173"
     bot_token: str
     bot_username: str
     support_chat_id: int | None = None
     seed_demo: bool = False
-    admin_email: str
-    admin_password: str
+    admin_email: str | None = None
+    admin_password: str | None = None
     mistral_api_key: str
+
+    @property
+    def database_url(self) -> str:
+        return URL.create(
+            drivername="postgresql+psycopg",
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+        ).render_as_string(hide_password=False)
 
 class Config(BaseModel):
     categories: list[str] = ["Одежда", "Гаджеты", "Книги", "Для учёбы", "Для дома", "Другое"]
