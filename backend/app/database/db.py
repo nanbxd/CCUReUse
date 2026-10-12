@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from collections.abc import Iterator
 from config import config, settings
 
 DATABASE_URL = settings.database_url
@@ -11,6 +12,6 @@ elif DATABASE_URL.startswith("postgresql://"):
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine)
 
-def get_db():
+def get_db() -> Iterator[Session]:
     with SessionLocal() as db:
         yield db

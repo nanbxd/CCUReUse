@@ -115,7 +115,7 @@ class ModerationResponseModel(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_advice(self):
+    def validate_advice(self) -> "ModerationResponseModel":
         if self.decision == "reject" and not self.advice:
             raise ValueError(
                 "Advice must be provided when a listing is rejected."

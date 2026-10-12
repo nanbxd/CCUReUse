@@ -1,7 +1,8 @@
 import asyncio, base64, hashlib, hmac, os, secrets
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Any
 import jwt
 from aiogram import Bot
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
@@ -10,9 +11,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from config import config, settings
-from database.models import *
-from database.db import get_db, engine, SessionLocal
-from bot import run_bot
+from .database.models import *
+from .database.db import get_db, engine, SessionLocal
+from .bot import run_bot
 from models import UserIn, ProfileIn, LoginIn, ListingIn, StatusIn, PreferencesIn
 
 
@@ -63,7 +64,7 @@ def user_data(user: User) -> dict:
     return {"id": user.id, "name": user.name, "email": user.email, "education_level": user.education_level, "study_group": user.study_group, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "created_at": user.created_at.isoformat()}
 
 
-def migrate_user_columns():
+def migrate_user_columns() -> None:
     # create_all does not add columns to existing installations.
     if inspect(engine).has_table("users"):
         columns = {column["name"] for column in inspect(engine).get_columns("users")}
@@ -76,7 +77,7 @@ def migrate_user_columns():
                 connection.execute(text("ALTER TABLE users ADD COLUMN study_group VARCHAR(40) NOT NULL DEFAULT ''"))
 
 
-def prepare_admin():
+def prepare_admin() -> None:
     if not settings.admin_password:
         return
     if len(settings.admin_password) < 12:
@@ -107,7 +108,7 @@ def listing_data(item: Listing) -> dict:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(engine)
     migrate_user_columns()
     if os.getenv("SEED_DEMO", "true").lower() == "true":
@@ -128,17 +129,17 @@ app.add_middleware(CORSMiddleware, allow_origins=[v.strip() for v in os.getenv("
 
 
 @app.get("/api/health")
-def health():
+def health() -> dict[str, bool]:
     return {"ok": True}
 
 
 @app.get("/api/categories")
-def categories():
+def categories() -> list[str]:
     return config.categories
 
 
 @app.get("/api/support")
-def support_info():
+def support_info() -> dict[str, str]:
     return {
         "bot_url": f"https://t.me/{settings.bot_username}?start=support"
         if settings.bot_username and settings.bot_token and settings.support_chat_id
@@ -147,7 +148,7 @@ def support_info():
 
 
 @app.post("/api/auth/register", status_code=201)
-def register(data: UserIn, db: Annotated[Session, Depends(get_db)]):
+def register(data: UserIn, db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     email = data.email.lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, "Этот email уже зарегистрирован")
@@ -159,7 +160,7 @@ def register(data: UserIn, db: Annotated[Session, Depends(get_db)]):
 
 
 @app.post("/api/auth/login")
-def login(data: LoginIn, db: Annotated[Session, Depends(get_db)]):
+def login(data: LoginIn, db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     user = db.scalar(select(User).where(User.email == data.email.lower()))
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(401, "Неверный email или пароль")
@@ -167,13 +168,13 @@ def login(data: LoginIn, db: Annotated[Session, Depends(get_db)]):
 
 
 @app.get("/api/me")
-def me(user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+def me(user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     mine = db.scalars(select(Listing).where(Listing.owner_id == user.id).order_by(Listing.created_at.desc())).all()
     return {**user_data(user), "listings": [listing_data(item) for item in mine], "stats": {"published": len(mine), "given": sum(item.status == "given" for item in mine), "active": sum(item.status != "given" for item in mine)}}
 
 
 @app.patch("/api/me")
-def update_me(data: ProfileIn, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+def update_me(data: ProfileIn, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     for key, value in data.model_dump().items():
         if value is not None:
             setattr(user, key, value.strip())
@@ -182,7 +183,7 @@ def update_me(data: ProfileIn, user: Annotated[User, Depends(current_user)], db:
 
 
 @app.get("/api/users/{user_id}")
-def public_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
+def public_user(user_id: int, db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(404, "Студент не найден")
@@ -191,7 +192,7 @@ def public_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
 
 
 @app.get("/api/listings")
-def listings(db: Annotated[Session, Depends(get_db)], category: str | None = None, q: str | None = None, status: str = "available", limit: int = Query(60, ge=1, le=100), offset: int = Query(0, ge=0)):
+def listings(db: Annotated[Session, Depends(get_db)], category: str | None = None, q: str | None = None, status: str = "available", limit: int = Query(60, ge=1, le=100), offset: int = Query(0, ge=0)) -> list[dict[str, Any]]:
     stmt = select(Listing).order_by(Listing.created_at.desc(), Listing.id.desc())
     if category and category != "Все":
         stmt = stmt.where(Listing.category == category)
@@ -204,14 +205,14 @@ def listings(db: Annotated[Session, Depends(get_db)], category: str | None = Non
 
 
 @app.get("/api/listings/{listing_id}")
-def listing(listing_id: int, db: Annotated[Session, Depends(get_db)]):
+def listing(listing_id: int, db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     item = db.get(Listing, listing_id)
     if not item:
         raise HTTPException(404, "Вещь не найдена")
     return listing_data(item)
 
 
-async def notify_subscribers(listing_id: int):
+async def notify_subscribers(listing_id: int) -> None:
     if not settings.bot_token:
         return
     with SessionLocal() as db:
@@ -220,7 +221,10 @@ async def notify_subscribers(listing_id: int):
             return
         subs = db.scalars(select(Subscription).where(Subscription.enabled == True, Subscription.user_id != item.owner_id)).all()
         telegram_subs = db.scalars(select(TelegramSubscription).where(TelegramSubscription.enabled == True)).all()
-        recipients = sorted({s.chat_id for s in [*subs, *telegram_subs] if item.category in s.categories.split("|")})
+        recipients = sorted(
+            {s.chat_id for s in subs if item.category in s.categories.split("|")}
+            | {s.chat_id for s in telegram_subs if item.category in s.categories.split("|")}
+        )
         title, category, location = item.title, item.category, item.location
     bot = Bot(settings.bot_token)
     frontend = os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")[0].strip().rstrip("/")
@@ -235,7 +239,7 @@ async def notify_subscribers(listing_id: int):
 
 
 @app.post("/api/listings", status_code=201)
-def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     if not user.contact.strip():
         raise HTTPException(400, "Сначала добавьте контакт для связи в профиле")
     item = Listing(**data.model_dump(), owner_id=user.id)
@@ -247,7 +251,7 @@ def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User
 
 
 @app.patch("/api/listings/{listing_id}/status")
-def update_status(listing_id: int, data: StatusIn, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+def update_status(listing_id: int, data: StatusIn, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     item = db.get(Listing, listing_id)
     if not item:
         raise HTTPException(404, "Вещь не найдена")
@@ -259,7 +263,7 @@ def update_status(listing_id: int, data: StatusIn, user: Annotated[User, Depends
 
 
 @app.delete("/api/listings/{listing_id}", status_code=204)
-def delete_listing(listing_id: int, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+def delete_listing(listing_id: int, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> None:
     item = db.get(Listing, listing_id)
     if not item:
         raise HTTPException(404, "Вещь не найдена")
@@ -270,13 +274,13 @@ def delete_listing(listing_id: int, user: Annotated[User, Depends(current_user)]
 
 
 @app.get("/api/me/telegram")
-def telegram_settings(user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+def telegram_settings(user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     sub = db.scalar(select(Subscription).where(Subscription.user_id == user.id))
     return {"connected": bool(sub), "categories": sub.categories.split("|") if sub and sub.categories else [], "enabled": sub.enabled if sub else False, "bot_url": f"https://t.me/{settings.bot_username}?start={telegram_code(user.id)}" if settings.bot_username else ""}
 
 
 @app.put("/api/me/telegram")
-def telegram_preferences(data: PreferencesIn, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+def telegram_preferences(data: PreferencesIn, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     sub = db.scalar(select(Subscription).where(Subscription.user_id == user.id))
     if not sub:
         raise HTTPException(400, "Сначала подключите Telegram")
@@ -286,7 +290,7 @@ def telegram_preferences(data: PreferencesIn, user: Annotated[User, Depends(curr
     return {"connected": True, "categories": data.categories, "enabled": data.enabled}
 
 
-def seed_demo():
+def seed_demo() -> None:
     with SessionLocal() as db:
         if db.scalar(select(func.count(User.id))):
             return

@@ -5,8 +5,8 @@ from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, Inlin
 from sqlalchemy import select
 from config import config, settings
 from aiogram.fsm.state import State, StatesGroup
-from database.models import *
-from database.db import SessionLocal
+from .database.models import *
+from .database.db import SessionLocal
 import hashlib, hmac
 
 class SupportState(StatesGroup):
@@ -42,7 +42,7 @@ def preference_keyboard(sub: Subscription | TelegramSubscription) -> InlineKeybo
 
 
 def chat_subscription(db: Session, chat_id: str, create: bool = False) -> Subscription | TelegramSubscription | None:
-    sub = db.scalar(select(Subscription).where(Subscription.chat_id == chat_id))
+    sub: Subscription | TelegramSubscription | None = db.scalar(select(Subscription).where(Subscription.chat_id == chat_id))
     if sub:
         return sub
     sub = db.scalar(select(TelegramSubscription).where(TelegramSubscription.chat_id == chat_id))
@@ -59,6 +59,8 @@ async def show_categories(message: Message) -> None:
         return
     with SessionLocal() as db:
         sub = chat_subscription(db, str(message.chat.id), create=True)
+        if sub is None:
+            return
         await message.answer("Выбери интересующие категории кнопками ниже. Отмеченные категории будут приносить уведомления о новых вещах. Настройки можно открыть снова командой /categories.", reply_markup=preference_keyboard(sub))
 
 bot_router = Router()
@@ -126,6 +128,8 @@ async def bot_chat_id(message: Message) -> None:
 
 @bot_router.message(SupportState.waiting_for_message)
 async def bot_support_message(message: Message) -> None:
+    if message.bot is None or settings.support_chat_id is None:
+        return
     if not message.text:
         await message.answer("Пожалуйста, отправь вопрос текстом.")
         return
@@ -147,7 +151,7 @@ async def bot_support_message(message: Message) -> None:
 
 @bot_router.message(F.reply_to_message)
 async def bot_support_reply(message: Message) -> None:
-    if not settings.support_chat_id or str(message.chat.id) != settings.support_chat_id or not message.text:
+    if not settings.support_chat_id or str(message.chat.id) != str(settings.support_chat_id) or not message.text or message.reply_to_message is None or message.bot is None:
         return
     with SessionLocal() as db:
         original = db.scalar(select(SupportMessage).where(SupportMessage.admin_message_id == message.reply_to_message.message_id))
@@ -164,6 +168,9 @@ async def bot_support_reply(message: Message) -> None:
 
 @bot_router.callback_query(F.data.startswith("cat:") | (F.data == "toggle"))
 async def bot_preference(callback: CallbackQuery) -> None:
+    if not isinstance(callback.message, Message) or callback.data is None:
+        await callback.answer()
+        return
     with SessionLocal() as db:
         sub = chat_subscription(db, str(callback.message.chat.id))
         if not sub:

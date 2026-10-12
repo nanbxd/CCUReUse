@@ -1,6 +1,6 @@
 from openai import AsyncOpenAI
 from pydantic import BaseModel
-from typing import TypeVar
+from typing import TypeVar, cast
 from models import ChatCompletionsMessage, MistralModel
 from config import settings
 
@@ -20,7 +20,7 @@ async def parser_call(
     response_format: type[T],
 ) -> T:
     response = await client.chat.completions.parse(
-        messages=[message.model_dump(mode="json") for message in messages], # type: ignore
+        messages=[message.model_dump(mode="json") for message in messages],
         model=model.value,
         response_format=response_format,
     )
@@ -29,4 +29,4 @@ async def parser_call(
     if message.parsed is None:
         raise RuntimeError("OpenAI SDK returned none when a valid parsed model expected")
 
-    return message.parsed
+    return cast(T, message.parsed)
