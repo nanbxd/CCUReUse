@@ -72,7 +72,7 @@ class ChatCompletionsImageUrl(BaseModel):
     detail: Literal["auto", "low", "high"] = "auto"
 
 class ChatCompletionsImagePart(BaseModel):
-    role: Literal["image_url"] = "image_url"
+    type: Literal["image_url"] = "image_url"
     image_url: ChatCompletionsImageUrl
 
 ChatCompletionsPart: TypeAlias = ChatCompletionsTextPart | ChatCompletionsImagePart
@@ -113,15 +113,3 @@ class ModerationResponseModel(BaseModel):
             "to disguise or bypass a policy violation."
         ),
     )
-
-    @model_validator(mode="after")
-    def validate_advice(self):
-        if self.decision == "reject" and not self.advice:
-            raise ValueError(
-                "Advice must be provided when a listing is rejected."
-            )
-        if self.decision != "reject" and self.advice is not None:
-            raise ValueError(
-                "Advice must be null unless the listing is rejected."
-            )
-        return self
