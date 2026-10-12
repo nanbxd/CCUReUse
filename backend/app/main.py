@@ -1,162 +1,19 @@
-import asyncio
-import base64
-import hashlib
-import hmac
-import os
-import secrets
+import asyncio, base64, hashlib, hmac, os, secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
-
+from typing import Annotated
 import jwt
-from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import Command, CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from dotenv import load_dotenv
+from aiogram import Bot
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, func, inspect, or_, select, text
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
-
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./curu.db")
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-SECRET = os.getenv("JWT_SECRET", "dev-only-change-me")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "")
-SUPPORT_CHAT_ID = os.getenv("SUPPORT_CHAT_ID", "").strip()
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "demo@curu.local").strip().lower()
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
-CATEGORIES = ["Одежда", "Гаджеты", "Книги", "Для учёбы", "Для дома", "Другое"]
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine)
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-class User(Base):
-    __tablename__ = "users"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100))
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(200))
-    faculty: Mapped[str] = mapped_column(String(120), default="")
-    education_level: Mapped[str] = mapped_column(String(20), default="", nullable=False)
-    study_group: Mapped[str] = mapped_column(String(40), default="", nullable=False)
-    contact: Mapped[str] = mapped_column(String(200), default="")
-    bio: Mapped[str] = mapped_column(String(400), default="")
-    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    listings: Mapped[list["Listing"]] = relationship(back_populates="owner")
-
-
-class Listing(Base):
-    __tablename__ = "listings"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    title: Mapped[str] = mapped_column(String(100))
-    description: Mapped[str] = mapped_column(String(2000))
-    category: Mapped[str] = mapped_column(String(40), index=True)
-    condition: Mapped[str] = mapped_column(String(40))
-    location: Mapped[str] = mapped_column(String(120))
-    image: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(20), default="available", index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
-    owner: Mapped[User] = relationship(back_populates="listings")
-
-
-class Subscription(Base):
-    __tablename__ = "subscriptions"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
-    chat_id: Mapped[str] = mapped_column(String(40), unique=True)
-    categories: Mapped[str] = mapped_column(String(300), default="")
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-class TelegramSubscription(Base):
-    __tablename__ = "telegram_subscriptions"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    chat_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
-    categories: Mapped[str] = mapped_column(String(300), default="")
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-class SupportMessage(Base):
-    __tablename__ = "support_messages"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    admin_message_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
-    user_chat_id: Mapped[str] = mapped_column(String(40))
-
-
-class UserIn(BaseModel):
-    name: str = Field(min_length=2, max_length=100)
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
-    education_level: Literal["university", "college"]
-    study_group: str = Field(default="", max_length=40)
-    contact: str = Field(default="", max_length=200)
-
-
-class LoginIn(BaseModel):
-    email: str = Field(min_length=3, max_length=255)
-    password: str
-
-
-class ProfileIn(BaseModel):
-    name: str = Field(min_length=2, max_length=100)
-    education_level: Literal["university", "college"] | None = None
-    study_group: str = Field(default="", max_length=40)
-    contact: str = Field(default="", max_length=200)
-    bio: str = Field(default="", max_length=400)
-
-
-class ListingIn(BaseModel):
-    title: str = Field(min_length=3, max_length=100)
-    description: str = Field(min_length=10, max_length=2000)
-    category: str
-    condition: str = Field(min_length=2, max_length=40)
-    location: str = Field(min_length=2, max_length=120)
-    image: str = Field(default="", max_length=2_800_000)
-
-    @field_validator("category")
-    @classmethod
-    def category_valid(cls, value: str) -> str:
-        if value not in CATEGORIES:
-            raise ValueError("Неизвестная категория")
-        return value
-
-    @field_validator("image")
-    @classmethod
-    def image_valid(cls, value: str) -> str:
-        if value and not (value.startswith("data:image/jpeg;base64,") or value.startswith("data:image/png;base64,") or value.startswith("data:image/webp;base64,") or value.startswith("https://")):
-            raise ValueError("Нужно изображение JPEG, PNG, WebP или HTTPS-ссылка")
-        return value
-
-
-class StatusIn(BaseModel):
-    status: Literal["available", "reserved", "given"]
-
-
-class PreferencesIn(BaseModel):
-    categories: list[str]
-    enabled: bool = True
-
-    @field_validator("categories")
-    @classmethod
-    def categories_valid(cls, value: list[str]) -> list[str]:
-        if any(category not in CATEGORIES for category in value):
-            raise ValueError("Неизвестная категория")
-        return list(dict.fromkeys(value))
+from sqlalchemy import func, inspect, or_, select, text
+from sqlalchemy.orm import Session
+from config import config, settings
+from database.models import *
+from database.db import get_db, engine, SessionLocal
+from bot import run_bot
+from models import UserIn, ProfileIn, LoginIn, ListingIn, StatusIn, PreferencesIn
 
 
 def hash_password(password: str, salt: bytes | None = None) -> str:
@@ -175,30 +32,13 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def token_for(user_id: int, purpose: str = "access", minutes: int = 60 * 24 * 14) -> str:
-    return jwt.encode({"sub": str(user_id), "purpose": purpose, "exp": datetime.now(timezone.utc) + timedelta(minutes=minutes)}, SECRET, algorithm="HS256")
+    return jwt.encode({"sub": str(user_id), "purpose": purpose, "exp": datetime.now(timezone.utc) + timedelta(minutes=minutes)}, settings.jwt_secret, algorithm="HS256")
 
 
 def telegram_code(user_id: int) -> str:
     payload = f"{user_id:x}.{int((datetime.now(timezone.utc) + timedelta(minutes=15)).timestamp()):x}"
-    signature = hmac.new(SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:20]
+    signature = hmac.new(settings.jwt_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:20]
     return f"{payload}.{signature}"
-
-
-def user_from_telegram_code(code: str) -> int:
-    try:
-        user_hex, expiry_hex, signature = code.split(".")
-        payload = f"{user_hex}.{expiry_hex}"
-        expected = hmac.new(SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:20]
-        if not hmac.compare_digest(signature, expected) or int(expiry_hex, 16) < datetime.now(timezone.utc).timestamp():
-            raise ValueError()
-        return int(user_hex, 16)
-    except (ValueError, TypeError):
-        raise ValueError("Invalid Telegram link")
-
-
-def get_db():
-    with SessionLocal() as db:
-        yield db
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -208,7 +48,7 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     if not credentials:
         raise HTTPException(401, "Войдите в аккаунт")
     try:
-        payload = jwt.decode(credentials.credentials, SECRET, algorithms=["HS256"])
+        payload = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=["HS256"])
         if payload.get("purpose") != "access":
             raise ValueError()
         user = db.get(User, int(payload["sub"]))
@@ -237,204 +77,33 @@ def migrate_user_columns():
 
 
 def prepare_admin():
-    if not ADMIN_PASSWORD:
+    if not settings.admin_password:
         return
-    if len(ADMIN_PASSWORD) < 12:
+    if len(settings.admin_password) < 12:
         raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters")
     with SessionLocal() as db:
-        user = db.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        user = db.scalar(select(User).where(User.email == settings.admin_email))
         if not user:
-            user = User(name="Команда CURU", email=ADMIN_EMAIL, faculty="Caspian University", contact="", bio="Команда CURU")
+            user = User(name="Команда CURU", email=settings.admin_email, faculty="Caspian University", contact="", bio="Команда CURU")
             db.add(user)
-        user.password_hash = hash_password(ADMIN_PASSWORD)
+        user.password_hash = hash_password(settings.admin_password)
         user.is_admin = True
         db.commit()
 
 
 def listing_data(item: Listing) -> dict:
-    return {"id": item.id, "title": item.title, "description": item.description, "category": item.category, "condition": item.condition, "location": item.location, "image": item.image, "status": item.status, "created_at": item.created_at.isoformat(), "owner": user_data(item.owner)}
-
-
-bot_router = Router()
-
-
-class SupportState(StatesGroup):
-    waiting_for_message = State()
-
-
-async def start_support(message: Message, state: FSMContext):
-    if message.chat.type != "private":
-        await message.answer("Открой бота в личных сообщениях, чтобы написать в поддержку.")
-        return
-    if not SUPPORT_CHAT_ID:
-        await message.answer("Поддержка пока недоступна. Попробуй позже.")
-        return
-    await state.set_state(SupportState.waiting_for_message)
-    await message.answer("Напиши свой вопрос одним сообщением. Команда CURU ответит здесь. Для выхода отправь /cancel.")
-
-
-def preference_keyboard(sub: Subscription | TelegramSubscription) -> InlineKeyboardMarkup:
-    selected = set(filter(None, sub.categories.split("|")))
-    rows = [[InlineKeyboardButton(text=f"{'✅' if category in selected else '▫️'} {category}", callback_data=f"cat:{i}")] for i, category in enumerate(CATEGORIES)]
-    rows.append([InlineKeyboardButton(text="🔔 Уведомления включены" if sub.enabled else "🔕 Уведомления выключены", callback_data="toggle")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def chat_subscription(db: Session, chat_id: str, create: bool = False) -> Subscription | TelegramSubscription | None:
-    sub = db.scalar(select(Subscription).where(Subscription.chat_id == chat_id))
-    if sub:
-        return sub
-    sub = db.scalar(select(TelegramSubscription).where(TelegramSubscription.chat_id == chat_id))
-    if not sub and create:
-        sub = TelegramSubscription(chat_id=chat_id, categories="", enabled=True)
-        db.add(sub)
-        db.commit()
-    return sub
-
-
-async def show_categories(message: Message):
-    if message.chat.type != "private":
-        await message.answer("Открой бота в личных сообщениях, чтобы настроить уведомления.")
-        return
-    with SessionLocal() as db:
-        sub = chat_subscription(db, str(message.chat.id), create=True)
-        await message.answer("Выбери интересующие категории кнопками ниже. Отмеченные категории будут приносить уведомления о новых вещах. Настройки можно открыть снова командой /categories.", reply_markup=preference_keyboard(sub))
-
-
-@bot_router.message(CommandStart())
-async def bot_start(message: Message, state: FSMContext):
-    code = (message.text or "").split(maxsplit=1)
-    if len(code) == 2 and code[1] == "support":
-        await start_support(message, state)
-        return
-    if len(code) != 2:
-        await show_categories(message)
-        return
-    try:
-        user_id = user_from_telegram_code(code[1])
-    except ValueError:
-        await message.answer("Ссылка на профиль устарела. Новую можно получить на сайте; уведомления доступны и без привязки аккаунта.")
-        await show_categories(message)
-        return
-    with SessionLocal() as db:
-        if not db.get(User, user_id):
-            await message.answer("Аккаунт не найден.")
-            await show_categories(message)
-            return
-        old_chat = db.scalar(select(Subscription).where(Subscription.chat_id == str(message.chat.id)))
-        if old_chat and old_chat.user_id != user_id:
-            db.delete(old_chat)
-            db.flush()
-        sub = db.scalar(select(Subscription).where(Subscription.user_id == user_id))
-        standalone = db.scalar(select(TelegramSubscription).where(TelegramSubscription.chat_id == str(message.chat.id)))
-        if not sub:
-            sub = Subscription(user_id=user_id, chat_id=str(message.chat.id), categories=standalone.categories if standalone else "", enabled=standalone.enabled if standalone else True)
-            db.add(sub)
-        else:
-            sub.chat_id = str(message.chat.id)
-            if standalone:
-                sub.categories = standalone.categories
-                sub.enabled = standalone.enabled
-        if standalone:
-            db.delete(standalone)
-        db.commit()
-        await message.answer("Аккаунт подключён. Выбери категории для уведомлений:", reply_markup=preference_keyboard(sub))
-
-
-@bot_router.message(Command("categories"))
-async def bot_categories(message: Message):
-    await show_categories(message)
-
-
-@bot_router.message(Command("support"))
-async def bot_support(message: Message, state: FSMContext):
-    await start_support(message, state)
-
-
-@bot_router.message(Command("cancel"))
-async def bot_cancel(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Обращение закрыто. Чтобы написать снова, отправь /support.")
-
-
-@bot_router.message(Command("chatid"))
-async def bot_chat_id(message: Message):
-    await message.answer(f"ID этого чата: {message.chat.id}")
-
-
-@bot_router.message(SupportState.waiting_for_message)
-async def bot_support_message(message: Message):
-    if not message.text:
-        await message.answer("Пожалуйста, отправь вопрос текстом.")
-        return
-    if len(message.text) > 3500:
-        await message.answer("Сообщение слишком длинное. Сократи его до 3500 символов.")
-        return
-    sender = message.from_user.full_name if message.from_user else "Пользователь"
-    username = f" (@{message.from_user.username})" if message.from_user and message.from_user.username else ""
-    try:
-        sent = await message.bot.send_message(int(SUPPORT_CHAT_ID), f"📩 Поддержка CURU\nОт: {sender}{username}\n\n{message.text}\n\nОтветь на это сообщение реплаем.")
-    except Exception:
-        await message.answer("Не удалось отправить вопрос. Попробуй позже.")
-        return
-    with SessionLocal() as db:
-        db.add(SupportMessage(admin_message_id=sent.message_id, user_chat_id=str(message.chat.id)))
-        db.commit()
-    await message.answer("Вопрос отправлен команде CURU. Ответ придёт сюда. Можешь написать ещё сообщение или отправить /cancel.")
-
-
-@bot_router.message(F.reply_to_message)
-async def bot_support_reply(message: Message):
-    if not SUPPORT_CHAT_ID or str(message.chat.id) != SUPPORT_CHAT_ID or not message.text:
-        return
-    with SessionLocal() as db:
-        original = db.scalar(select(SupportMessage).where(SupportMessage.admin_message_id == message.reply_to_message.message_id))
-        user_chat_id = original.user_chat_id if original else None
-    if not user_chat_id:
-        return
-    try:
-        await message.bot.send_message(int(user_chat_id), f"💬 Ответ команды CURU:\n\n{message.text}")
-    except Exception:
-        await message.answer("Не удалось доставить ответ пользователю.")
-        return
-    await message.reply("Ответ отправлен пользователю.")
-
-
-@bot_router.callback_query(F.data.startswith("cat:") | (F.data == "toggle"))
-async def bot_preference(callback: CallbackQuery):
-    with SessionLocal() as db:
-        sub = chat_subscription(db, str(callback.message.chat.id))
-        if not sub:
-            await callback.answer("Отправь /start, чтобы выбрать категории", show_alert=True)
-            return
-        if callback.data == "toggle":
-            sub.enabled = not sub.enabled
-        else:
-            try:
-                index = int(callback.data.split(":")[1])
-                category = CATEGORIES[index] if 0 <= index < len(CATEGORIES) else None
-            except (ValueError, IndexError):
-                category = None
-            if category is None:
-                await callback.answer("Категория не найдена")
-                return
-            selected = set(filter(None, sub.categories.split("|")))
-            selected.symmetric_difference_update({category})
-            sub.categories = "|".join(c for c in CATEGORIES if c in selected)
-        db.commit()
-        await callback.message.edit_reply_markup(reply_markup=preference_keyboard(sub))
-        await callback.answer("Сохранено")
-
-
-async def run_bot():
-    bot = Bot(BOT_TOKEN)
-    dispatcher = Dispatcher()
-    dispatcher.include_router(bot_router)
-    try:
-        await bot.set_my_commands([BotCommand(command="start", description="Выбрать категории"), BotCommand(command="categories", description="Настроить уведомления"), BotCommand(command="support", description="Написать в поддержку"), BotCommand(command="cancel", description="Завершить обращение")])
-        await dispatcher.start_polling(bot, handle_signals=False)
-    finally:
-        await bot.session.close()
+    return {
+        "id": item.id,
+        "title": item.title,
+        "description": item.description,
+        "category": item.category,
+        "condition": item.condition,
+        "location": item.location,
+        "image": item.image,
+        "status": item.status,
+        "created_at": item.created_at.isoformat(),
+        "owner": user_data(item.owner),
+    }
 
 
 @asynccontextmanager
@@ -444,7 +113,7 @@ async def lifespan(app: FastAPI):
     if os.getenv("SEED_DEMO", "true").lower() == "true":
         seed_demo()
     prepare_admin()
-    task = asyncio.create_task(run_bot()) if BOT_TOKEN else None
+    task = asyncio.create_task(run_bot()) if settings.bot_token else None
     yield
     if task:
         task.cancel()
@@ -465,12 +134,16 @@ def health():
 
 @app.get("/api/categories")
 def categories():
-    return CATEGORIES
+    return config.categories
 
 
 @app.get("/api/support")
 def support_info():
-    return {"bot_url": f"https://t.me/{BOT_USERNAME}?start=support" if BOT_USERNAME and BOT_TOKEN and SUPPORT_CHAT_ID else ""}
+    return {
+        "bot_url": f"https://t.me/{settings.bot_username}?start=support"
+        if settings.bot_username and settings.bot_token and settings.support_chat_id
+        else ""
+    }
 
 
 @app.post("/api/auth/register", status_code=201)
@@ -539,7 +212,7 @@ def listing(listing_id: int, db: Annotated[Session, Depends(get_db)]):
 
 
 async def notify_subscribers(listing_id: int):
-    if not BOT_TOKEN:
+    if not settings.bot_token:
         return
     with SessionLocal() as db:
         item = db.get(Listing, listing_id)
@@ -549,7 +222,7 @@ async def notify_subscribers(listing_id: int):
         telegram_subs = db.scalars(select(TelegramSubscription).where(TelegramSubscription.enabled == True)).all()
         recipients = sorted({s.chat_id for s in [*subs, *telegram_subs] if item.category in s.categories.split("|")})
         title, category, location = item.title, item.category, item.location
-    bot = Bot(BOT_TOKEN)
+    bot = Bot(settings.bot_token)
     frontend = os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")[0].strip().rstrip("/")
     try:
         for chat_id in recipients:
@@ -599,7 +272,7 @@ def delete_listing(listing_id: int, user: Annotated[User, Depends(current_user)]
 @app.get("/api/me/telegram")
 def telegram_settings(user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
     sub = db.scalar(select(Subscription).where(Subscription.user_id == user.id))
-    return {"connected": bool(sub), "categories": sub.categories.split("|") if sub and sub.categories else [], "enabled": sub.enabled if sub else False, "bot_url": f"https://t.me/{BOT_USERNAME}?start={telegram_code(user.id)}" if BOT_USERNAME else ""}
+    return {"connected": bool(sub), "categories": sub.categories.split("|") if sub and sub.categories else [], "enabled": sub.enabled if sub else False, "bot_url": f"https://t.me/{settings.bot_username}?start={telegram_code(user.id)}" if settings.bot_username else ""}
 
 
 @app.put("/api/me/telegram")
