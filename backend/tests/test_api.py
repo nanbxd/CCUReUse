@@ -14,7 +14,7 @@ os.environ["BOT_TOKEN"] = ""
 os.environ["JWT_SECRET"] = "test-secret-with-at-least-thirty-two-characters"
 os.environ["ADMIN_PASSWORD"] = "local-test-admin-password"
 
-from app.main import (  # noqa: E402
+from backend.app.main import (  # noqa: E402
     SessionLocal, Subscription, TelegramSubscription, app, bot_categories, bot_preference,
     bot_start, bot_support_message, bot_support_reply, engine, notify_subscribers,
     telegram_code, user_from_telegram_code,
