@@ -72,7 +72,7 @@ class ChatCompletionsImageUrl(BaseModel):
     detail: Literal["auto", "low", "high"] = "auto"
 
 class ChatCompletionsImagePart(BaseModel):
-    type: Literal["image_url"] = "image_url"
+
     type: Literal["image_url"] = "image_url"
     image_url: ChatCompletionsImageUrl
 
@@ -83,7 +83,16 @@ class ChatCompletionsMessage(BaseModel):
     content: str | list[ChatCompletionsPart]
 
 class AgnesModel(str, Enum):
-    FLASH = "agnes-2.5-flash"
+    AGNES_3_FLASH = "agnes-3.0-flash"
+    AGNES_2_5_FLASH = "agnes-2.5-flash"
+
+class MistralModel(str, Enum):
+    MINISTRAL_14B = "ministral-14b-latest"
+    MINISTRAL_8B = "ministral-8b-latest"
+    MINISTRAL_3B = "ministral-3b-latest"
+    CODESTRAL = "codestral-latest"
+
+LLMModel: TypeAlias = AgnesModel | MistralModel
 
 class ModerationResponseModel(BaseModel):
     decision: Literal["approve", "reject", "review"] = Field(
@@ -98,16 +107,7 @@ class ModerationResponseModel(BaseModel):
     reason: str = Field(
         description=(
             "A brief, one-sentence explanation of the moderation decision "
-            "based on the listing content and moderation rules."
+            "based on the listing content and moderation rules. "
+            "The reason must be at the same language as the user's."
         )
-    )
-
-    advice: str | None = Field(
-        default=None,
-        description=(
-            "For rejected listings, provide actionable advice on how to "
-            "correct the listing so it may comply with the rules, if possible. "
-            "For review or approved listings, use null. Never suggest ways "
-            "to disguise or bypass a policy violation."
-        ),
     )

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     admin_email: str = "demo@curu.local"
     admin_password: str = ""
     mistral_api_key: str = ""
+    agnes_api_key: str = ""
 
     @property
     def database_url(self) -> str:
