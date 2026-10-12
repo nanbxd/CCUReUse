@@ -122,41 +122,6 @@ def listing_data(item: Listing) -> dict:
         "owner": user_data(item.owner),
     }
 
-async def moderate_listing_request(data: ListingIn) -> ModerationResponseModel:
-    result = await parser_call(
-        model=MistralModel.MINISTRAL_14B,
-        messages=[
-            ChatCompletionsMessage(
-                role="system",
-                content=MODERATION_SYSTEM_PROMPT,
-            ),
-            ChatCompletionsMessage(
-                role="user",
-                content=[
-                    ChatCompletionsTextPart(
-                        text=json.dumps(
-                            {
-                                "title": data.title,
-                                "description": data.description,
-                                "category": data.category,
-                                "condition": data.condition,
-                                "location": data.location,
-                            },
-                            ensure_ascii=False,
-                        )
-                    ),
-                    ChatCompletionsImagePart(image_url=ChatCompletionsImageUrl(
-                        url=data.image,
-                        detail="high",
-                    ))
-                ]
-            )
-        ],
-        response_format=ModerationResponseModel,
-    )
-
-    return result
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(engine)
@@ -298,14 +263,17 @@ async def notify_subscribers(listing_id: int) -> None:
 async def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     if not user.contact.strip():
         raise HTTPException(400, "Сначала добавьте контакт для связи в профиле")
-    if not settings.mistral_api_key or not settings.bot_token or settings.support_chat_id is None:
+    if (not settings.mistral_api_key and not settings.agnes_api_key) or not settings.bot_token or settings.support_chat_id is None:
         raise HTTPException(503, "Публикация временно недоступна: модерация не настроена")
+    
     result = await safe_moderate_listing(data)
     status = "available" if result.decision == "approve" else "pending"
+
     item = Listing(**data.model_dump(), owner_id=user.id, status=status, moderation_reason=result.reason if status == "pending" else "")
     db.add(item)
     db.commit()
     db.refresh(item)
+
     if status == "pending":
         await notify_admin_for_review(item.id)
     else:
