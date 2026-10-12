@@ -5,8 +5,8 @@ from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, Inlin
 from sqlalchemy import select
 from config import config, settings
 from aiogram.fsm.state import State, StatesGroup
-from database.models import *
-from database.db import SessionLocal
+from app.database.models import *
+from app.database.db import SessionLocal
 import hashlib, hmac
 
 class SupportState(StatesGroup):
