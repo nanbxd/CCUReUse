@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from config import config, settings
 from .database.models import *
 from .database.db import get_db, engine, SessionLocal
-from .bot import run_bot
+from .bot import notify_admin_for_review, run_bot
+from .ai.moderation import safe_moderate_listing
 from models import UserIn, ProfileIn, LoginIn, ListingIn, StatusIn, PreferencesIn
 
 
@@ -60,6 +61,15 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     raise HTTPException(401, "Сессия истекла. Войдите снова")
 
 
+def optional_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)], db: Annotated[Session, Depends(get_db)]) -> User | None:
+    if credentials is None:
+        return None
+    try:
+        return current_user(credentials, db)
+    except HTTPException:
+        return None
+
+
 def user_data(user: User) -> dict:
     return {"id": user.id, "name": user.name, "email": user.email, "education_level": user.education_level, "study_group": user.study_group, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "created_at": user.created_at.isoformat()}
 
@@ -75,6 +85,11 @@ def migrate_user_columns() -> None:
                 connection.execute(text("ALTER TABLE users ADD COLUMN education_level VARCHAR(20) NOT NULL DEFAULT ''"))
             if "study_group" not in columns:
                 connection.execute(text("ALTER TABLE users ADD COLUMN study_group VARCHAR(40) NOT NULL DEFAULT ''"))
+    if inspect(engine).has_table("listings"):
+        columns = {column["name"] for column in inspect(engine).get_columns("listings")}
+        if "moderation_reason" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE listings ADD COLUMN moderation_reason TEXT NOT NULL DEFAULT ''"))
 
 
 def prepare_admin() -> None:
@@ -102,6 +117,7 @@ def listing_data(item: Listing) -> dict:
         "location": item.location,
         "image": item.image,
         "status": item.status,
+        "moderation_reason": item.moderation_reason,
         "created_at": item.created_at.isoformat(),
         "owner": user_data(item.owner),
     }
@@ -170,7 +186,7 @@ def login(data: LoginIn, db: Annotated[Session, Depends(get_db)]) -> dict[str, A
 @app.get("/api/me")
 def me(user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     mine = db.scalars(select(Listing).where(Listing.owner_id == user.id).order_by(Listing.created_at.desc())).all()
-    return {**user_data(user), "listings": [listing_data(item) for item in mine], "stats": {"published": len(mine), "given": sum(item.status == "given" for item in mine), "active": sum(item.status != "given" for item in mine)}}
+    return {**user_data(user), "listings": [listing_data(item) for item in mine], "stats": {"published": sum(item.status != "pending" for item in mine), "given": sum(item.status == "given" for item in mine), "active": sum(item.status in ("available", "reserved") for item in mine)}}
 
 
 @app.patch("/api/me")
@@ -187,12 +203,12 @@ def public_user(user_id: int, db: Annotated[Session, Depends(get_db)]) -> dict[s
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(404, "Студент не найден")
-    items = db.scalars(select(Listing).where(Listing.owner_id == user_id).order_by(Listing.created_at.desc())).all()
+    items = db.scalars(select(Listing).where(Listing.owner_id == user_id, Listing.status != "pending").order_by(Listing.created_at.desc())).all()
     return {**user_data(user), "listings": [listing_data(item) for item in items], "stats": {"published": len(items), "given": sum(item.status == "given" for item in items)}}
 
 
 @app.get("/api/listings")
-def listings(db: Annotated[Session, Depends(get_db)], category: str | None = None, q: str | None = None, status: str = "available", limit: int = Query(60, ge=1, le=100), offset: int = Query(0, ge=0)) -> list[dict[str, Any]]:
+def listings(db: Annotated[Session, Depends(get_db)], viewer: Annotated[User | None, Depends(optional_user)], category: str | None = None, q: str | None = None, status: str = "available", limit: int = Query(60, ge=1, le=100), offset: int = Query(0, ge=0)) -> list[dict[str, Any]]:
     stmt = select(Listing).order_by(Listing.created_at.desc(), Listing.id.desc())
     if category and category != "Все":
         stmt = stmt.where(Listing.category == category)
@@ -201,13 +217,17 @@ def listings(db: Annotated[Session, Depends(get_db)], category: str | None = Non
         stmt = stmt.where(or_(Listing.title.ilike(pattern), Listing.description.ilike(pattern)))
     if status != "all":
         stmt = stmt.where(Listing.status == status)
+    if viewer is None or not viewer.is_admin:
+        stmt = stmt.where(Listing.status != "pending")
     return [listing_data(item) for item in db.scalars(stmt.offset(offset).limit(limit)).all()]
 
 
 @app.get("/api/listings/{listing_id}")
-def listing(listing_id: int, db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
+def listing(listing_id: int, db: Annotated[Session, Depends(get_db)], viewer: Annotated[User | None, Depends(optional_user)]) -> dict[str, Any]:
     item = db.get(Listing, listing_id)
     if not item:
+        raise HTTPException(404, "Вещь не найдена")
+    if item.status == "pending" and (viewer is None or (viewer.id != item.owner_id and not viewer.is_admin)):
         raise HTTPException(404, "Вещь не найдена")
     return listing_data(item)
 
@@ -239,14 +259,21 @@ async def notify_subscribers(listing_id: int) -> None:
 
 
 @app.post("/api/listings", status_code=201)
-def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
+async def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
     if not user.contact.strip():
         raise HTTPException(400, "Сначала добавьте контакт для связи в профиле")
-    item = Listing(**data.model_dump(), owner_id=user.id)
+    if not settings.mistral_api_key or not settings.bot_token or settings.support_chat_id is None:
+        raise HTTPException(503, "Публикация временно недоступна: модерация не настроена")
+    result = await safe_moderate_listing(data)
+    status = "available" if result.decision == "approve" else "pending"
+    item = Listing(**data.model_dump(), owner_id=user.id, status=status, moderation_reason=result.reason if status == "pending" else "")
     db.add(item)
     db.commit()
     db.refresh(item)
-    tasks.add_task(notify_subscribers, item.id)
+    if status == "pending":
+        await notify_admin_for_review(item.id)
+    else:
+        tasks.add_task(notify_subscribers, item.id)
     return listing_data(item)
 
 
@@ -257,6 +284,8 @@ def update_status(listing_id: int, data: StatusIn, user: Annotated[User, Depends
         raise HTTPException(404, "Вещь не найдена")
     if item.owner_id != user.id:
         raise HTTPException(403, "Это не ваша вещь")
+    if item.status == "pending":
+        raise HTTPException(409, "Объявление ожидает решения модератора")
     item.status = data.status
     db.commit()
     return listing_data(item)
@@ -271,6 +300,21 @@ def delete_listing(listing_id: int, user: Annotated[User, Depends(current_user)]
         raise HTTPException(403, "Это не ваша вещь")
     db.delete(item)
     db.commit()
+
+
+@app.post("/api/admin/listings/{listing_id}/approve")
+def approve_listing(listing_id: int, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
+    if not user.is_admin:
+        raise HTTPException(403, "Требуются права администратора")
+    item = db.scalar(select(Listing).where(Listing.id == listing_id).with_for_update())
+    if item is None:
+        raise HTTPException(404, "Объявление не найдено")
+    if item.status != "pending":
+        raise HTTPException(409, "Объявление уже обработано")
+    item.status = "available"
+    db.commit()
+    tasks.add_task(notify_subscribers, item.id)
+    return listing_data(item)
 
 
 @app.get("/api/me/telegram")

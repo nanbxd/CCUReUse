@@ -1,13 +1,56 @@
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BotCommand, BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select
 from config import config, settings
 from aiogram.fsm.state import State, StatesGroup
 from .database.models import *
 from .database.db import SessionLocal
-import hashlib, hmac
+import base64, hashlib, hmac, logging
+
+logger = logging.getLogger(__name__)
+
+
+def moderation_keyboard(listing_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Разрешить публикацию", callback_data=f"moderate:approve:{listing_id}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"moderate:delete:{listing_id}"),
+    ]])
+
+
+async def notify_admin_for_review(listing_id: int) -> None:
+    if not settings.bot_token or settings.support_chat_id is None:
+        logger.error("Cannot notify administrator about listing %s: Telegram is not configured", listing_id)
+        return
+    with SessionLocal() as db:
+        item = db.get(Listing, listing_id)
+        if item is None or item.status != "pending":
+            return
+        title, description, category = item.title, item.description, item.category
+        image, reason = item.image, item.moderation_reason[:500]
+    bot = Bot(settings.bot_token)
+    try:
+        if image:
+            try:
+                if image.startswith("data:"):
+                    mime, encoded = image.split(",", 1)
+                    suffix = ".png" if "png" in mime else ".webp" if "webp" in mime else ".jpg"
+                    photo: BufferedInputFile | str = BufferedInputFile(base64.b64decode(encoded), filename="listing" + suffix)
+                else:
+                    photo = image
+                await bot.send_photo(settings.support_chat_id, photo)
+            except Exception:
+                logger.exception("Could not attach image for listing %s", listing_id)
+        await bot.send_message(
+            settings.support_chat_id,
+            f"⏸ Объявление #{listing_id} задержано\n\n{title}\n{category}\n{description}\n\nПричина: {reason}",
+            reply_markup=moderation_keyboard(listing_id),
+        )
+    except Exception:
+        logger.exception("Could not notify administrator about listing %s", listing_id)
+    finally:
+        await bot.session.close()
 
 class SupportState(StatesGroup):
     waiting_for_message = State()
@@ -193,6 +236,48 @@ async def bot_preference(callback: CallbackQuery) -> None:
         db.commit()
         await callback.message.edit_reply_markup(reply_markup=preference_keyboard(sub))
         await callback.answer("Сохранено")
+
+
+@bot_router.callback_query(F.data.startswith("moderate:"))
+async def bot_moderate_listing(callback: CallbackQuery) -> None:
+    message = callback.message
+    if not isinstance(message, Message) or callback.bot is None or callback.data is None:
+        await callback.answer()
+        return
+    if settings.support_chat_id is None or message.chat.id != settings.support_chat_id:
+        await callback.answer("Недоступно в этом чате", show_alert=True)
+        return
+    if message.chat.type == "private":
+        allowed = callback.from_user.id == settings.support_chat_id
+    else:
+        member = await callback.bot.get_chat_member(message.chat.id, callback.from_user.id)
+        allowed = member.status in ("creator", "administrator")
+    if not allowed:
+        await callback.answer("Только администратор чата может решить", show_alert=True)
+        return
+    try:
+        _, action, raw_id = callback.data.split(":", 2)
+        listing_id = int(raw_id)
+        if action not in ("approve", "delete") or listing_id <= 0:
+            raise ValueError()
+    except ValueError:
+        await callback.answer("Неверная команда", show_alert=True)
+        return
+    with SessionLocal() as db:
+        item = db.scalar(select(Listing).where(Listing.id == listing_id).with_for_update())
+        if item is None or item.status != "pending":
+            await callback.answer("Объявление уже обработано или удалено", show_alert=True)
+            return
+        if action == "approve":
+            item.status = "available"
+        else:
+            db.delete(item)
+        db.commit()
+    await message.edit_reply_markup(reply_markup=None)
+    await callback.answer("Опубликовано" if action == "approve" else "Удалено")
+    if action == "approve":
+        from .main import notify_subscribers
+        await notify_subscribers(listing_id)
 
 
 async def run_bot() -> None:

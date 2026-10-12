@@ -72,7 +72,7 @@ class ChatCompletionsImageUrl(BaseModel):
     detail: Literal["auto", "low", "high"] = "auto"
 
 class ChatCompletionsImagePart(BaseModel):
-    role: Literal["image_url"] = "image_url"
+    type: Literal["image_url"] = "image_url"
     image_url: ChatCompletionsImageUrl
 
 ChatCompletionsPart: TypeAlias = ChatCompletionsTextPart | ChatCompletionsImagePart
@@ -81,11 +81,8 @@ class ChatCompletionsMessage(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str | list[ChatCompletionsPart]
 
-class MistralModel(str, Enum):
-    MINISTRAL_14B = "ministral-14b-latest"
-    MINISTRAL_8B = "ministral-8b-latest"
-    MINISTRAL_3B = "ministral-3b-latest"
-    CODESTRAL = "codestral-latest"
+class AgnesModel(str, Enum):
+    FLASH = "agnes-2.5-flash"
 
 class ModerationResponseModel(BaseModel):
     decision: Literal["approve", "reject", "review"] = Field(
