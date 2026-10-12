@@ -1,4 +1,4 @@
-import asyncio, base64, hashlib, hmac, os, secrets
+import asyncio, base64, hashlib, hmac, os, secrets, json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -10,10 +10,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from config import config, settings
-from database.models import *
-from database.db import get_db, engine, SessionLocal
-from bot import run_bot
-from models import UserIn, ProfileIn, LoginIn, ListingIn, StatusIn, PreferencesIn
+from app.database.models import *
+from app.database.db import get_db, engine, SessionLocal
+from app.bot import run_bot
+from models import *
+from app.ai.parser import parser_call
+from app.ai.moderation_system_prompt import MODERATION_SYSTEM_PROMPT
 
 
 def hash_password(password: str, salt: bytes | None = None) -> str:
@@ -105,6 +107,40 @@ def listing_data(item: Listing) -> dict:
         "owner": user_data(item.owner),
     }
 
+async def moderate_listing_request(data: ListingIn) -> ModerationResponseModel:
+    result = await parser_call(
+        model=MistralModel.MINISTRAL_14B,
+        messages=[
+            ChatCompletionsMessage(
+                role="system",
+                content=MODERATION_SYSTEM_PROMPT,
+            ),
+            ChatCompletionsMessage(
+                role="user",
+                content=[
+                    ChatCompletionsTextPart(
+                        text=json.dumps(
+                            {
+                                "title": data.title,
+                                "description": data.description,
+                                "category": data.category,
+                                "condition": data.condition,
+                                "location": data.location,
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                    ChatCompletionsImagePart(image_url=ChatCompletionsImageUrl(
+                        url=data.image,
+                        detail="high",
+                    ))
+                ]
+            )
+        ],
+        response_format=ModerationResponseModel,
+    )
+
+    return result
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -114,7 +150,9 @@ async def lifespan(app: FastAPI):
         seed_demo()
     prepare_admin()
     task = asyncio.create_task(run_bot()) if settings.bot_token else None
+
     yield
+
     if task:
         task.cancel()
         try:
@@ -235,9 +273,14 @@ async def notify_subscribers(listing_id: int):
 
 
 @app.post("/api/listings", status_code=201)
-def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
+async def create_listing(data: ListingIn, tasks: BackgroundTasks, user: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]):
     if not user.contact.strip():
         raise HTTPException(400, "Сначала добавьте контакт для связи в профиле")
+
+    result = await moderate_listing_request(data)
+    if result.decision != "approve":
+        raise HTTPException(403, f"К сожалению, это объявление не может быть размещено.\nПричина: {result.reason}\nСовет: {result.advice}")
+    
     item = Listing(**data.model_dump(), owner_id=user.id)
     db.add(item)
     db.commit()
