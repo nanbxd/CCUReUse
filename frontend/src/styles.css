@@ -193,6 +193,7 @@ html[data-theme="dark"] .footer-grid b,html[data-theme="dark"] .footer-note p{co
 .my-item strong,.my-item small,.profile-contact strong,.student-profile p,.detail-description,.support-card p{overflow-wrap:anywhere}
 .btn{max-width:100%}
 @media(max-width:760px){
+  .about-steps{grid-template-columns:minmax(0,1fr)}
   html[data-theme="dark"] .main-nav{background:#211914;box-shadow:0 18px 30px #0008}
   html[data-theme="dark"] .main-nav a{border-color:var(--border)}
   .steps-inner{flex-wrap:wrap;justify-content:center}
