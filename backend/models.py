@@ -108,6 +108,7 @@ class ModerationResponseModel(BaseModel):
         description=(
             "A brief, one-sentence explanation of the moderation decision "
             "based on the listing content and moderation rules. "
-            "The reason must be at the same language as the user's."
+            "Write it entirely in the language selected by the system's "
+            "response-language rules."
         )
     )
