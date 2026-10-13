@@ -51,7 +51,7 @@ body{background:#fff}
 .status-available{background:#fff0e5;color:#c45a20}
 .toast{background:#cf5918;box-shadow:0 12px 30px #9d3d1738}
 .hero-visual{display:grid;place-items:center;height:auto;min-height:590px}
-.hero-animation{width:min(630px,125%);max-width:none;filter:drop-shadow(0 20px 35px #3a210f55)}
+.hero-animation{width:min(630px,125%);max-width:none;filter:drop-shadow(0 20px 35px #3a210f55);-webkit-mask-image:radial-gradient(ellipse 68% 68% at center,#000 48%,transparent 72%);mask-image:radial-gradient(ellipse 68% 68% at center,#000 48%,transparent 72%)}
 .admin-listings{padding-top:36px;padding-bottom:90px}
 .admin-item{grid-template-columns:64px minmax(0,1fr) auto auto;align-items:center}
 .admin-item .link-danger{white-space:nowrap}
