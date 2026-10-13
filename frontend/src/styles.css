@@ -99,3 +99,127 @@ body{background:#fff}
 @media(max-width:760px){.hero-grid{grid-template-columns:minmax(0,1fr)}.hero-copy,.hero-visual,.hero-buttons{min-width:0}.hero-animation{width:100%}}
 @media(max-width:480px){.hero h1{font-size:clamp(32px,9vw,38px)}}
 .status-pending{background:#fff3cf;color:#8a6100}
+
+/* Dark theme */
+:root{color-scheme:dark;color:#f3e8df;background:#14100e;--surface:#201915;--surface-raised:#2b211b;--surface-soft:#261c17;--border:#4a3529;--text:#f3e8df;--muted:#c9b5a5;--orange:#f18743}
+html,body,#root{max-width:100%}
+body{background:#14100e;color:var(--text)}
+.site-header{background:#1d1713;border-color:var(--border)}
+.main-nav a{color:#d1b9a7}
+.brand-copy strong,.main-nav a.active,.main-nav a:hover,.header-account,.mobile-menu{color:var(--orange)}
+.brand-copy small{color:var(--muted)}
+.header-account svg{border-color:var(--border)}
+.brand-mark{background:#c65b21}
+.section-label,.text-link,.accent-dot,.heading-spark{color:var(--orange)}
+.btn-primary,.btn-dark,.search-box button,.chip.active{background:#ce6124;border-color:#ce6124;color:#fff}
+.btn-primary:hover,.btn-dark:hover,.search-box button:hover{background:#ec7938;border-color:#ec7938}
+.btn-lime{background:#f1a66e;color:#2e160b}
+.btn-lime:hover{background:#ffc092}
+.text-link{color:var(--orange)}
+.hero{background:#512713}
+.hero:before{background:radial-gradient(circle at 76% 30%,#8d411d 0%,transparent 40%),linear-gradient(125deg,#351b12 0%,#713216 65%,#472113 100%)}
+.hero-copy>p,.about-hero p{color:#f3d8c3}
+.hero h1 em,.about-hero h1 em{color:#ffba84}
+.hero-main-card{background:var(--surface);border-color:var(--surface)}
+.hero-card-info{color:var(--text)}
+.hero-card-info span,.hero-card-info small{color:var(--muted)}
+.hero-sticker{background:var(--surface-raised);color:var(--text)}
+.hero-bottom-line{background:linear-gradient(90deg,#a9481e 0 26%,#ee8b4b 26% 52%,#b85a29 52% 75%,#e6a06c 75%)}
+.steps-strip,.join-section,.latest-section,.auth-page{background:#191310;border-color:var(--border)}
+.step-icon,.category-tile>.category-icon,.aside-icon,.empty>span,.stat-icon,.form-section-title>span{background:#43281b;color:var(--orange)}
+.steps-inner p,.section-heading p,.join-inner p,.mission-banner p,.page-hero p,.profile-banner p,.empty p,.catalog-count,.loading,.back-link,.feed-heading span,.post-user small,.post-time,.post-content p,.post-footer,.aside-card p,.aside-tip p,.detail-description,.detail-facts span,.owner-box span:not(.avatar),.contact-detail,.auth-story>p,.auth-card-body>p,.form-section-title p,.profile-top p,.profile-top div>span,.profile-contact p,.stats-row small,.my-item small,.student-profile p,.student-facts span,.about-steps p,.about-values p,.support-strip p,.support-card p,.support-status{color:var(--muted)}
+.steps-inner strong,.section-heading h2,.join-inner h2,.about-content h2,.category-tile strong,.item-body h3,.empty h3,.feed-heading h2,.post-user strong,.post-content h3,.aside-card h3,.detail-info h1,.detail-info h3,.detail-facts strong,.auth-story h1,.auth-card h2,.form-section-title h2,.profile-top h2,.stats-row strong,.subheading h2,.my-item strong,.student-profile h1,.about-steps h3,.support-strip h2,.support-card h2{color:var(--text)}
+.category-tile,.item-card,.feed-post,.profile-card,.auth-card,.create-form,.aside-card,.aside-tip,.about-steps>div,.student-profile,.stats-row>div,.owner-box,.my-items,.support-strip,.support-card{background:var(--surface);border-color:var(--border)}
+.category-tile:hover,.item-card:hover{border-color:#a95c31;box-shadow:0 14px 30px #0005}
+.category-tile>strong{color:#fff}
+.item-photo,.post-image,.detail-photo,.my-item-image{background:#30241d}
+.image-fallback{background:linear-gradient(145deg,#352820,#4b3021);color:#d7a580}
+.item-kicker,.item-meta,.profile-contact>span,.owner-box small{color:var(--muted)}
+.item-kicker span:first-child,.post-category,.detail-kicker,.aside-tip span,.about-steps>div>span{color:var(--orange)}
+.mission-banner,.about-values{background:#302016}
+.mission-banner h2 em,.mission-art>span{color:#f59a5a}
+.mission-circle{background:#4a2a1a;color:#f3924b;border-color:#ac5d2d;box-shadow:0 0 0 22px #5b321b70,0 0 0 44px #5b321b40}
+.footer{background:#21140f}
+.footer-bottom,.footer-note{border-color:var(--border)}
+.footer-bottom,.footer-tagline{color:var(--muted)}
+.page-hero,.profile-banner{background:#291b14}
+.search-box,.chip,.owner-actions select,.icon-button,.logout-button{background:var(--surface);border-color:var(--border);color:var(--text)}
+.search-box input{background:transparent;color:var(--text)}
+.search-box input::placeholder,.form-stack input::placeholder,.form-stack textarea::placeholder{color:#ac9584}
+.filter-row,.post-footer,.detail-rule,.auth-tabs,.profile-contact,.profile-edit{border-color:var(--border)}
+.detail-rule{background:var(--border)}
+.chip{color:#e1cabb}
+.chip.active{color:#fff}
+.filter-label,.post-footer a,.back-link:hover,.auth-switch button{color:var(--orange)}
+.auth-switch,.owner-box>svg,.my-item>svg,.aside-tip p{color:var(--muted)}
+.avatar,.profile-avatar{background:#54321f;color:#ffd0a5}
+.status-pill,.status-available{background:#53301d;color:#ffd0a5}
+.status-reserved{background:#513620;color:#f2bf81}
+.status-given{background:#33302b;color:#d6c6b8}
+.status-pending{background:#4a391c;color:#f6d488}
+.notice{background:#38281e;color:#eed0b8}
+.notice.error{background:#4b2629;color:#ffc4c4}
+.auth-tabs button{background:var(--surface);color:var(--muted)}
+.auth-tabs button.active{color:var(--orange);box-shadow:inset 0 -3px var(--orange)}
+.form-stack label,.owner-actions label{color:var(--text)}
+.form-stack label small{color:var(--muted)}
+.form-stack input,.form-stack select,.form-stack textarea{background:#191310;border-color:var(--border);color:var(--text)}
+.form-stack input:focus,.form-stack select:focus,.form-stack textarea:focus{border-color:var(--orange);box-shadow:0 0 0 3px #f1874328}
+.upload-box{background:#241b16;border-color:#875235;color:var(--orange)}
+.upload-box strong,.profile-contact strong,.owner-box a,.student-contact strong{color:#f3aa74}
+.upload-box span,.student-contact{color:var(--muted)}
+.my-item{border-color:var(--border)}
+.my-item:hover{background:#32241b}
+.telegram-card{background:#783819}
+.telegram-icon{background:#aa562b}
+.logout-button{color:var(--muted)}
+.about-hero{background:linear-gradient(125deg,#512612,#883b1a)}
+.support-logo{background:#d7ebfa}
+.toast{background:#9a431c}
+.footer-grid b,.footer-note p{color:var(--text)}
+
+/* Small screens: keep controls and long content inside the viewport. */
+.hero-grid,.hero-copy,.hero-visual,.hero-buttons,.feed-layout,.create-layout,.profile-layout,.detail-grid,.auth-layout,.support-card>div,.profile-main,.profile-aside{min-width:0}
+.filter-chips{min-width:0;max-width:100%}
+.my-item>div:nth-child(2),.post-user,.profile-top>div,.student-profile>div{min-width:0}
+.my-item strong,.my-item small,.profile-contact strong,.student-profile p,.detail-description,.support-card p{overflow-wrap:anywhere}
+.btn{max-width:100%}
+@media(max-width:760px){
+  .main-nav{background:#211914;box-shadow:0 18px 30px #0008}
+  .main-nav a{border-color:var(--border)}
+  .steps-inner{flex-wrap:wrap;justify-content:center}
+  .step-chevron{display:none}
+  .steps-inner>div{flex:1 1 120px;justify-content:center}
+  .hero-blob{max-width:100%}
+  .feed-heading,.post-top,.post-footer,.detail-kicker,.section-heading,.subheading{flex-wrap:wrap}
+  .support-card{max-width:100%}
+  .student-profile{min-width:0}
+}
+@media(max-width:480px){
+  .container{width:calc(100% - 28px)}
+  .header-inner{gap:8px}
+  .header-actions{gap:5px}
+  .header-account svg{width:32px;height:32px;padding:7px}
+  .hero-buttons{flex-direction:column}
+  .hero-buttons .btn{width:100%;white-space:normal;text-align:center}
+  .steps-inner>div{flex:1 1 85px;max-width:32%}
+  .category-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .item-kicker{gap:4px;flex-wrap:wrap}
+  .item-meta{overflow-wrap:anywhere}
+  .post-image{height:auto;aspect-ratio:4/3}
+  .detail-facts{flex-wrap:wrap}
+  .owner-box>div{min-width:0;overflow-wrap:anywhere}
+  .contact-btn,.publish-btn,.telegram-card .btn,.support-strip .btn,.support-card .btn{white-space:normal;text-align:center;min-height:54px;overflow-wrap:anywhere}
+  .profile-top{flex-wrap:wrap}
+  .profile-top .icon-button{margin-left:auto}
+  .subheading{gap:10px}
+  .subheading .btn{font-size:12px;padding:0 10px;white-space:normal;text-align:center}
+  .my-item{flex-wrap:wrap}
+  .my-item .status-pill{margin-left:57px}
+  .admin-item .status-pill{margin-left:0}
+  .admin-item .btn{grid-column:2;white-space:normal;font-size:11px;text-align:center}
+  .admin-pagination{gap:8px;flex-wrap:wrap}
+  .admin-pagination .btn{padding:0 10px}
+  .student-profile{flex-wrap:wrap}
+  .support-card{padding:22px}
+}
