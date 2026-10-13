@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Check, ChevronRight, Clock3, Heart, Leaf, MapPin, Menu, Plus, Search, SlidersHorizontal, UserRound, X, Package, LogOut, Edit3, ExternalLink, Camera, Gift, Recycle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronRight, Clock3, Heart, Leaf, MapPin, Menu, Moon, Sun, Plus, Search, SlidersHorizontal, UserRound, X, Package, LogOut, Edit3, ExternalLink, Camera, Gift, Recycle } from 'lucide-react'
 import { api, categories } from './api'
 import { Lottie } from 'lottie-react'
 import curuAnimation from './animations/curu.json'
@@ -45,7 +45,7 @@ function Brand({ light = false }) {
   </Link>
 }
 
-function Header({ user, onLogout }) {
+function Header({ user, theme, onThemeToggle }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const navigate = useNavigate()
   const close = () => setMenuOpen(false)
@@ -62,6 +62,7 @@ function Header({ user, onLogout }) {
       </nav>
       <div className="header-actions">
         <button className="btn btn-primary btn-sm header-add" onClick={() => navigate(user ? '/create' : '/auth?next=/create')}><Plus size={18} /> Разместить вещь</button>
+        <button className="theme-toggle" type="button" onClick={onThemeToggle} aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'} title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>
         <Link className="header-account" to={user ? '/profile' : '/auth'} title={user ? 'Мой профиль' : 'Войти'}><UserRound size={19} /><span>{user ? user.name.split(' ')[0] : 'Войти'}</span></Link>
         <button className="mobile-menu" aria-label={menuOpen ? 'Закрыть меню' : 'Открыть меню'} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button>
       </div>
@@ -240,8 +241,14 @@ function AdminListings({ user }) {
 
 export default function App() {
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('curu_user') || 'null') } catch { return null } })
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#1d1713' : '#ffffff')
+    try { localStorage.setItem('curu_theme', theme) } catch { /* Theme still works when storage is unavailable. */ }
+  }, [theme])
   function onAuth(data) { localStorage.setItem('curu_token', data.token); localStorage.setItem('curu_user', JSON.stringify(data.user)); setUser(data.user) }
   function updateUser(data) { localStorage.setItem('curu_user', JSON.stringify(data)); setUser(data) }
   function onLogout() { localStorage.removeItem('curu_token'); localStorage.removeItem('curu_user'); setUser(null) }
-  return <><Header user={user} onLogout={onLogout} /><Routes><Route path="/" element={<Home />} /><Route path="/catalog" element={<Catalog />} /><Route path="/feed" element={<Feed />} /><Route path="/listing/:id" element={<ListingDetail user={user} />} /><Route path="/auth" element={<Auth onAuth={onAuth} />} /><Route path="/create" element={<Create user={user} />} /><Route path="/profile" element={<Profile user={user} setUser={updateUser} onLogout={onLogout} />} /><Route path="/admin" element={<AdminListings user={user} />} /><Route path="/student/:id" element={<Student />} /><Route path="/about" element={<About />} /><Route path="/support" element={<Support />} /><Route path="*" element={<main className="container simple-page"><Empty title="Страница не найдена" text="Возможно, ссылка устарела." /><Link className="btn btn-primary" to="/">На главную</Link></main>} /></Routes><Footer /></>
+  return <><Header user={user} theme={theme} onThemeToggle={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} /><Routes><Route path="/" element={<Home />} /><Route path="/catalog" element={<Catalog />} /><Route path="/feed" element={<Feed />} /><Route path="/listing/:id" element={<ListingDetail user={user} />} /><Route path="/auth" element={<Auth onAuth={onAuth} />} /><Route path="/create" element={<Create user={user} />} /><Route path="/profile" element={<Profile user={user} setUser={updateUser} onLogout={onLogout} />} /><Route path="/admin" element={<AdminListings user={user} />} /><Route path="/student/:id" element={<Student />} /><Route path="/about" element={<About />} /><Route path="/support" element={<Support />} /><Route path="*" element={<main className="container simple-page"><Empty title="Страница не найдена" text="Возможно, ссылка устарела." /><Link className="btn btn-primary" to="/">На главную</Link></main>} /></Routes><Footer /></>
 }
