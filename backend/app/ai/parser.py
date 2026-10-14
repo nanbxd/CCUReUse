@@ -42,6 +42,7 @@ async def parser_call(
         messages=[message.model_dump(mode="json") for message in messages], # type: ignore
         model=model.value,
         response_format=response_format,
+        temperature=0.2,
     )
     message = response.choices[0].message
 
