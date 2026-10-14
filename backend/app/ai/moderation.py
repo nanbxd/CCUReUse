@@ -44,11 +44,18 @@ async def moderate_listing(listing: ListingIn) -> ModerationResponseModel:
         ChatCompletionsMessage(role="user", content=content),
     ]
 
-    result = await parser_call(
-        model=AgnesModel.AGNES_3_FLASH,
-        messages=messages,
-        response_format=ModerationResponseModel,
-    )
+    try:
+        result = await parser_call(
+            model=AgnesModel.AGNES_3_FLASH,
+            messages=messages,
+            response_format=ModerationResponseModel,
+        )
+    except Exception:
+        result = await parser_call(
+            model=MistralModel.MINISTRAL_14B,
+            messages=messages,
+            response_format=ModerationResponseModel,
+        )
 
     return result
 
