@@ -35,9 +35,9 @@ async def moderate_listing(listing: ListingIn) -> ModerationResponseModel:
         ))
 
     system_prompt = MODERATION_SYSTEM_PROMPT
-    # russian_listing = _mostly_russian(f"{listing.title} {listing.description}")
-    # if russian_listing:
-    #     system_prompt += "\n\nThe title and description are in Russian. Write the reason in Russian, using Cyrillic. Keep JSON keys and decision values unchanged."
+    russian_listing = _mostly_russian(f"{listing.title} {listing.description}")
+    if russian_listing:
+        system_prompt += "\n\nThe title and description are in Russian. Write the reason in Russian, using Cyrillic. Keep JSON keys and decision values unchanged."
         
     messages = [
         ChatCompletionsMessage(role="system", content=system_prompt),
