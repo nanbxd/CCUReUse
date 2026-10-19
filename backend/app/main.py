@@ -12,6 +12,8 @@ from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from config import config, settings
 from .database.models import *
+from .event_models import Event, Ticket, Review, EventInterest, EventNotification
+from .events import router_for, lifecycle
 from .database.db import get_db, engine, SessionLocal
 from .bot import notify_admin_for_review, run_bot
 from .ai.moderation import safe_moderate_listing
@@ -71,7 +73,7 @@ def optional_user(credentials: Annotated[HTTPAuthorizationCredentials | None, De
 
 
 def user_data(user: User) -> dict:
-    return {"id": user.id, "name": user.name, "email": user.email, "education_level": user.education_level, "study_group": user.study_group, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "created_at": user.created_at.isoformat()}
+    return {"id": user.id, "name": user.name, "email": user.email, "education_level": user.education_level, "study_group": user.study_group, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "is_organizer": user.is_organizer, "created_at": user.created_at.isoformat()}
 
 
 def migrate_user_columns() -> None:
@@ -79,6 +81,8 @@ def migrate_user_columns() -> None:
     if inspect(engine).has_table("users"):
         columns = {column["name"] for column in inspect(engine).get_columns("users")}
         with engine.begin() as connection:
+            if "is_organizer" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN is_organizer BOOLEAN NOT NULL DEFAULT FALSE"))
             if "is_admin" not in columns:
                 connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
             if "education_level" not in columns:
@@ -131,7 +135,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     prepare_admin()
     task = asyncio.create_task(run_bot()) if settings.bot_token else None
 
+    event_task = asyncio.create_task(lifecycle())
     yield
+    event_task.cancel()
+    try:
+        await event_task
+    except asyncio.CancelledError:
+        pass
 
     if task:
         task.cancel()
@@ -356,3 +366,5 @@ def seed_demo() -> None:
         for index, (title, category, condition, location, description, image) in enumerate(samples):
             db.add(Listing(owner_id=demo.id, title=title, category=category, condition=condition, location=location, description=description, image=image, created_at=datetime.now(timezone.utc) - timedelta(hours=index * 5)))
         db.commit()
+
+app.include_router(router_for(current_user))

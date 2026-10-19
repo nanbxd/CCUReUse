@@ -17,6 +17,7 @@ class User(Base):
     study_group: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     contact: Mapped[str] = mapped_column(String(200), default="")
     bio: Mapped[str] = mapped_column(String(400), default="")
+    is_organizer: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     listings: Mapped[list["Listing"]] = relationship(back_populates="owner")

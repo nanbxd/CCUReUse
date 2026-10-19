@@ -6,6 +6,7 @@ from sqlalchemy import pool
 from alembic import context
 from app.database.models import Base
 from app.database import models
+from app import event_models
 from config import settings
 
 # this is the Alembic Config object, which provides

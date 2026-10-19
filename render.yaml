@@ -12,12 +12,34 @@ services:
         fromDatabase:
           name: curu-db
           property: connectionString
+      - key: DB_USER
+        fromDatabase:
+          name: curu-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: curu-db
+          property: password
+      - key: DB_PORT
+        fromDatabase:
+          name: curu-db
+          property: port
+      - key: DB_HOST
+        fromDatabase:
+          name: curu-db
+          property: host
+      - key: DB_NAME
+        fromDatabase:
+          name: curu-db
+          property: database
       - key: JWT_SECRET
         generateValue: true
       - key: FRONTEND_URL
         sync: false
       - key: SEED_DEMO
         value: "true"
+      - key: ADMIN_EMAIL
+        value: demo@curu.local
       - key: ADMIN_PASSWORD
         sync: false
       - key: BOT_TOKEN
@@ -27,6 +49,8 @@ services:
       - key: SUPPORT_CHAT_ID
         sync: false
       - key: MISTRAL_API_KEY
+        sync: false
+      - key: AGNES_API_KEY
         sync: false
 
 databases:

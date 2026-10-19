@@ -7,3 +7,4 @@ dist/
 .env
 *.db
 .pytest_cache/
+.codex
