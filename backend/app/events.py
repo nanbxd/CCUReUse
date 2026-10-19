@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 import base64, hashlib, hmac, math
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, model_validator, field_validator
 from sqlalchemy import select, func, update
 from sqlalchemy.exc import IntegrityError
 from .database.db import get_db, SessionLocal
@@ -27,7 +27,7 @@ def settle(db):
                     ticket.status = 'refunded'
                     ticket.updated_at = now()
                 db.add(EventNotification(user_id=ticket.user_id, event_id=event.id, message=f'«{event.title}»: ' + ('мероприятие подтверждено. Билет активен.' if event.status == 'confirmed' else 'мероприятие отменено. Если вы переводили деньги, свяжитесь с организатором для возврата.')))
-        if event.status == 'confirmed' and utc(event.event_date) <= now(): event.status = 'completed'
+        if event.status == 'confirmed' and utc(event.end_date or event.event_date) <= now(): event.status = 'completed'
     db.commit()
 
 async def lifecycle():
@@ -43,16 +43,36 @@ class EventIn(BaseModel):
     title: str = Field(min_length=3, max_length=120)
     description: str = Field(min_length=10, max_length=5000)
     location: str = Field(min_length=2, max_length=300)
-    category: Literal['Встреча', 'Спорт', 'Творчество', 'Образование', 'Вечеринка'] = 'Встреча'
-    capacity: int = Field(ge=1, le=10000)
+    category: Literal['Встреча', 'Спорт', 'Творчество', 'Образование', 'Вечеринка', 'Конференция', 'Концерт', 'Фестиваль'] = 'Встреча'
+    capacity: int = Field(ge=1, le=100000)
     target_budget: int = Field(default=0, ge=0, le=100000000)
     ticket_price: int = Field(default=0, ge=0, le=1000000)
     is_private: bool = True
     deadline_date: datetime
     event_date: datetime
+    end_date: datetime | None = None
+    banner: str = Field(default='', max_length=2_800_000)
+
+    @field_validator('banner')
+    @classmethod
+    def valid_banner(cls, value):
+        if not value:
+            return value
+        try:
+            mime, encoded = value.split(',', 1)
+            if mime not in ('data:image/jpeg;base64', 'data:image/png;base64', 'data:image/webp;base64'):
+                raise ValueError()
+            image = base64.b64decode(encoded, validate=True)
+            signatures = (image.startswith(b'\x89PNG\r\n\x1a\n'), image.startswith(b'\xff\xd8\xff'), image[:4] == b'RIFF' and image[8:12] == b'WEBP')
+            if not any(signatures) or len(image) > 2_000_000:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ValueError('Баннер должен быть изображением JPEG, PNG или WebP до 2 МБ')
+        return value
     @model_validator(mode='after')
     def dates(self):
         if not now() < utc(self.deadline_date) < utc(self.event_date): raise ValueError('Срок сбора должен быть в будущем и раньше мероприятия')
+        if self.end_date and utc(self.end_date) <= utc(self.event_date): raise ValueError('Окончание должно быть позже начала мероприятия')
         if bool(self.ticket_price) != bool(self.target_budget): raise ValueError('Укажите и бюджет, и цену либо оставьте оба нулевыми')
         if self.ticket_price and math.ceil(self.target_budget / self.ticket_price) > self.capacity: raise ValueError('Вместимости недостаточно для сбора бюджета')
         return self
@@ -95,13 +115,13 @@ def router_for(current_user):
         return [{'id': uid, 'name': name} for uid, name in rows]
 
     @router.get('/events')
-    def events(archive: bool = False, category: str = '', organizer: int | None = None, db=Depends(get_db)):
+    def events(archive: bool = False, category: str = '', organizer: int | None = None, order: Literal['date', 'latest'] = 'date', limit: int = Query(60, ge=1, le=100), db=Depends(get_db)):
         settle(db)
         stmt = select(Event).where(Event.is_private == False)
         stmt = stmt.where(Event.status.in_(['completed', 'cancelled']) if archive else Event.status.in_(['exploration', 'crowdfunding', 'confirmed']))
         if category: stmt = stmt.where(Event.category == category)
         if organizer: stmt = stmt.where(Event.creator_id == organizer)
-        return [event_data(db, e) for e in db.scalars(stmt.order_by(Event.event_date.desc() if archive else Event.event_date).limit(200))]
+        return [event_data(db, e) for e in db.scalars(stmt.order_by(Event.created_at.desc() if order == 'latest' else Event.event_date.desc() if archive else Event.event_date).limit(limit))]
 
     @router.post('/events', status_code=201)
     def create(data: EventIn, user=Depends(current_user), db=Depends(get_db)):

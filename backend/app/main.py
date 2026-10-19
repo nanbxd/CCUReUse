@@ -2,13 +2,13 @@ import asyncio, base64, hashlib, hmac, os, secrets, json
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 import jwt
 from aiogram import Bot
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import func, inspect, or_, select, text
+from sqlalchemy import DateTime, func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from config import config, settings
 from .database.models import *
@@ -76,6 +76,20 @@ def user_data(user: User) -> dict:
     return {"id": user.id, "name": user.name, "email": user.email, "education_level": user.education_level, "study_group": user.study_group, "contact": user.contact, "bio": user.bio, "is_admin": user.is_admin, "is_organizer": user.is_organizer, "created_at": user.created_at.isoformat()}
 
 
+def migrate_hub_columns() -> None:
+    additions = {
+        'listings': {'price': 'INTEGER NOT NULL DEFAULT 0'},
+        'events': {'banner': "TEXT NOT NULL DEFAULT ''", 'end_date': DateTime(timezone=True).compile(dialect=engine.dialect)},
+    }
+    for table, fields in additions.items():
+        if inspect(engine).has_table(table):
+            existing = {c['name'] for c in inspect(engine).get_columns(table)}
+            with engine.begin() as connection:
+                for name, definition in fields.items():
+                    if name not in existing:
+                        connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {definition}'))
+
+
 def migrate_user_columns() -> None:
     # create_all does not add columns to existing installations.
     if inspect(engine).has_table("users"):
@@ -104,8 +118,12 @@ def prepare_admin() -> None:
     with SessionLocal() as db:
         user = db.scalar(select(User).where(User.email == settings.admin_email))
         if not user:
-            user = User(name="Команда CURU", email=settings.admin_email, faculty="Caspian University", contact="", bio="Команда CURU")
+            user = User(name="Команда CaspianHub", email=settings.admin_email, faculty="Caspian University", contact="", bio="Команда CaspianHub")
             db.add(user)
+        if user.name == "Команда CURU":
+            user.name = "Команда CaspianHub"
+        if user.bio == "Команда CURU":
+            user.bio = "Команда CaspianHub"
         user.password_hash = hash_password(settings.admin_password)
         user.is_admin = True
         db.commit()
@@ -120,6 +138,7 @@ def listing_data(item: Listing) -> dict:
         "condition": item.condition,
         "location": item.location,
         "image": item.image,
+        "price": item.price,
         "status": item.status,
         "moderation_reason": item.moderation_reason,
         "created_at": item.created_at.isoformat(),
@@ -130,6 +149,7 @@ def listing_data(item: Listing) -> dict:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(engine)
     migrate_user_columns()
+    migrate_hub_columns()
     if os.getenv("SEED_DEMO", "true").lower() == "true":
         seed_demo()
     prepare_admin()
@@ -151,7 +171,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             pass
 
 
-app = FastAPI(title="CURU API", lifespan=lifespan)
+app = FastAPI(title="CaspianHub API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[v.strip() for v in os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -219,8 +239,12 @@ def public_user(user_id: int, db: Annotated[Session, Depends(get_db)]) -> dict[s
 
 
 @app.get("/api/listings")
-def listings(db: Annotated[Session, Depends(get_db)], viewer: Annotated[User | None, Depends(optional_user)], category: str | None = None, q: str | None = None, status: str = "available", limit: int = Query(60, ge=1, le=100), offset: int = Query(0, ge=0)) -> list[dict[str, Any]]:
+def listings(db: Annotated[Session, Depends(get_db)], viewer: Annotated[User | None, Depends(optional_user)], category: str | None = None, q: str | None = None, status: str = "available", limit: int = Query(60, ge=1, le=100), offset: int = Query(0, ge=0), price_type: Literal["all", "free", "paid"] = "all") -> list[dict[str, Any]]:
     stmt = select(Listing).order_by(Listing.created_at.desc(), Listing.id.desc())
+    if price_type == "free":
+        stmt = stmt.where(Listing.price == 0)
+    elif price_type == "paid":
+        stmt = stmt.where(Listing.price > 0)
     if category and category != "Все":
         stmt = stmt.where(Listing.category == category)
     if q:
@@ -257,12 +281,13 @@ async def notify_subscribers(listing_id: int) -> None:
             | {s.chat_id for s in telegram_subs if item.category in s.categories.split("|")}
         )
         title, category, location = item.title, item.category, item.location
+        price_label = f"{item.price:,} ₸".replace(",", " ") if item.price else "Бесплатно"
     bot = Bot(settings.bot_token)
     frontend = os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")[0].strip().rstrip("/")
     try:
         for chat_id in recipients:
             try:
-                await bot.send_message(chat_id, f"♻️ Новая вещь на CURU!\n\n{title}\n{category} · {location}\n\n{frontend}/listing/{listing_id}")
+                await bot.send_message(chat_id, f"Новое объявление в маркете CaspianHub\n\n{title}\n{price_label}\n{category} · {location}\n\n{frontend}/market/{listing_id}")
             except Exception:
                 pass
     finally:
@@ -352,7 +377,7 @@ def seed_demo() -> None:
     with SessionLocal() as db:
         if db.scalar(select(func.count(User.id))):
             return
-        demo = User(name="Команда CURU", email="demo@curu.local", password_hash=hash_password(secrets.token_urlsafe(24)), faculty="Caspian University", contact="", bio="Передаём вещам новую историю")
+        demo = User(name="Команда CaspianHub", email="demo@curu.local", password_hash=hash_password(secrets.token_urlsafe(24)), faculty="Caspian University", contact="", bio="Передаём вещам новую историю")
         db.add(demo)
         db.flush()
         samples = [

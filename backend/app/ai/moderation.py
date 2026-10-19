@@ -20,6 +20,7 @@ async def moderate_listing(listing: ListingIn) -> ModerationResponseModel:
     content: list[ChatCompletionsPart] = [ChatCompletionsTextPart(
         text=json.dumps({
             "title": listing.title,
+            "price_kzt": listing.price,
             "description": listing.description,
             "category": listing.category,
             "condition": listing.condition,

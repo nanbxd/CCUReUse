@@ -74,7 +74,7 @@ async def start_support(message: Message, state: FSMContext) -> None:
         await message.answer("Поддержка пока недоступна. Попробуй позже.")
         return
     await state.set_state(SupportState.waiting_for_message)
-    await message.answer("Напиши свой вопрос одним сообщением. Команда CURU ответит здесь. Для выхода отправь /cancel.")
+    await message.answer("Напиши свой вопрос одним сообщением. Команда CaspianHub ответит здесь. Для выхода отправь /cancel.")
 
 
 def preference_keyboard(sub: Subscription | TelegramSubscription) -> InlineKeyboardMarkup:
@@ -182,14 +182,14 @@ async def bot_support_message(message: Message) -> None:
     sender = message.from_user.full_name if message.from_user else "Пользователь"
     username = f" (@{message.from_user.username})" if message.from_user and message.from_user.username else ""
     try:
-        sent = await message.bot.send_message(settings.support_chat_id, f"📩 Поддержка CURU\nОт: {sender}{username}\n\n{message.text}\n\nОтветь на это сообщение реплаем.")
+        sent = await message.bot.send_message(settings.support_chat_id, f"📩 Поддержка CaspianHub\nОт: {sender}{username}\n\n{message.text}\n\nОтветь на это сообщение реплаем.")
     except Exception:
         await message.answer("Не удалось отправить вопрос. Попробуй позже.")
         return
     with SessionLocal() as db:
         db.add(SupportMessage(admin_message_id=sent.message_id, user_chat_id=str(message.chat.id)))
         db.commit()
-    await message.answer("Вопрос отправлен команде CURU. Ответ придёт сюда. Можешь написать ещё сообщение или отправить /cancel.")
+    await message.answer("Вопрос отправлен команде CaspianHub. Ответ придёт сюда. Можешь написать ещё сообщение или отправить /cancel.")
 
 
 @bot_router.message(F.reply_to_message)
@@ -202,7 +202,7 @@ async def bot_support_reply(message: Message) -> None:
     if not user_chat_id:
         return
     try:
-        await message.bot.send_message(int(user_chat_id), f"💬 Ответ команды CURU:\n\n{message.text}")
+        await message.bot.send_message(int(user_chat_id), f"💬 Ответ команды CaspianHub:\n\n{message.text}")
     except Exception:
         await message.answer("Не удалось доставить ответ пользователю.")
         return

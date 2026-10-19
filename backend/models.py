@@ -26,6 +26,7 @@ class ProfileIn(BaseModel):
 
 
 class ListingIn(BaseModel):
+    price: int = Field(default=0, ge=0, le=100_000_000, strict=True)
     title: str = Field(min_length=3, max_length=100)
     description: str = Field(min_length=10, max_length=2000)
     category: str

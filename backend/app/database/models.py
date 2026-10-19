@@ -33,6 +33,7 @@ class Listing(Base):
     condition: Mapped[str] = mapped_column(String(40))
     location: Mapped[str] = mapped_column(String(120))
     image: Mapped[str] = mapped_column(Text, default="")
+    price: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="available", index=True)
     moderation_reason: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)

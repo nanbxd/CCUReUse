@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import ForeignKey, String, Text, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -13,6 +13,8 @@ class Event(Base):
     creator_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
     title: Mapped[str] = mapped_column(String(120))
     description: Mapped[str] = mapped_column(Text)
+    banner: Mapped[str] = mapped_column(Text, default='', server_default='', nullable=False)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     location: Mapped[str] = mapped_column(String(300))
     category: Mapped[str] = mapped_column(String(60), default='Встреча')
     capacity: Mapped[int]
